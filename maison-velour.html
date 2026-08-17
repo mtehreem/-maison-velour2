@@ -1908,7 +1908,7 @@ let PRODUCTS = [
 /* Load products from the local database — falls back to the array above if offline */
 async function loadProductsFromDB(){
   try {
-    const res = await fetch('http://localhost:4321/api/products');
+    const res = await fetch('/api/products');
     const data = await res.json();
     if(data && data.ok && Array.isArray(data.products) && data.products.length){
       PRODUCTS = data.products.map(p => ({
@@ -2793,7 +2793,7 @@ document.getElementById('lpRegisterBtn').addEventListener('click', async () => {
   if(dbRes && dbRes.error === 'Email already registered'){ notify({ type:'error', title:'Email in use', msg:'An account with this email already exists. Please log in instead.' }); return; }
   // API unreachable — do NOT silently save to localStorage, tell the user
   if(dbRes === null){
-    notify({ type:'error', title:'Server not connected', msg:'Could not reach the database server (localhost:4321). Start it with "npm start" and reload, then register again.' });
+    notify({ type:'error', title:'Server not connected', msg:'Could not reach the database server. Start it locally with "npm start" and reload, or check the live deployment.' });
     return;
   }
   // fallback: localStorage (offline)
@@ -3327,9 +3327,9 @@ function updateTopTicker(){
 }
 updateTopTicker();
 
-/* ---------- Local database bridge (SQLite API with localStorage fallback) ---------- */
+/* ---------- API bridge (relative /api — works on localhost and Vercel) ---------- */
 const DB = {
-  api: 'http://localhost:4321/api',
+  api: '/api',
   // session id for cart/wishlist scoping; falls back to localStorage id
   sid: (function(){ let s; try { s = localStorage.getItem('mv_sid') || ('mv' + Math.random().toString(36).slice(2)); localStorage.setItem('mv_sid', s); } catch(e){ s = 'mv' + Math.random().toString(36).slice(2); } return s; })(),
   async call(path, opts = {}){
