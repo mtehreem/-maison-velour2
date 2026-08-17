@@ -1,0 +1,396 @@
+
+cmc<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bus Ticket Booking</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f6f3f9;
+    color: #1e293b;
+    min-height: 100vh;
+  }
+
+  header {
+    background: #9673b8;
+    color: #fff;
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  header h1 { font-size: 1.25rem; }
+  header span { font-size: 0.85rem; opacity: 0.9; }
+
+  main { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+  }
+
+  .card h2 { font-size: 1.1rem; margin-bottom: 16px; }
+
+  /* Step 1: Search */
+  .search-form { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  .search-form select,
+  .search-form input {
+    flex: 1;
+    min-width: 180px;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    background: #fff;
+  }
+
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    background: #9673b8;
+    color: #fff;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  .btn:hover { background: #7a5490; }
+  .btn.secondary { background: #e2e8f0; color: #1e293b; }
+  .btn.secondary:hover { background: #cbd5e1; }
+  .btn:disabled { background: #94a3b8; cursor: not-allowed; }
+
+  .step { display: none; }
+  .step.active { display: block; }
+
+  /* Step 2: Bus list */
+  .bus {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .bus-info .bus-name { font-weight: 600; }
+  .bus-info .bus-meta { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
+  .bus-info .bus-price { font-weight: 600; color: #9673b8; margin-top: 4px; }
+
+  /* Step 3: Seat selection */
+  .seat-map {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    max-width: 320px;
+    margin: 0 auto 20px;
+  }
+  .seat {
+    width: 100%;
+    aspect-ratio: 1;
+    border: 2px solid #94a3b8;
+    border-radius: 8px;
+    background: #f8fafc;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #475569;
+  }
+  .seat.taken { background: #e2e8f0; border-color: #cbd5e1; color: #94a3b8; cursor: not-allowed; }
+  .seat.selected { background: #9673b8; border-color: #9673b8; color: #fff; }
+
+  .seat-legend { display: flex; justify-content: center; gap: 20px; font-size: 0.85rem; color: #64748b; margin-bottom: 20px; }
+  .seat-legend span { display: flex; align-items: center; gap: 6px; }
+  .legend-box { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 2px solid #94a3b8; }
+  .legend-box.available { background: #f8fafc; }
+  .legend-box.taken { background: #e2e8f0; border-color: #cbd5e1; }
+  .legend-box.selected { background: #9673b8; border-color: #9673b8; }
+
+  /* Step 4: Passenger details + confirmation */
+  .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .details-grid label { display: block; font-size: 0.85rem; margin-bottom: 4px; color: #475569; }
+  .details-grid input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.95rem; }
+
+  .summary { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; font-size: 0.92rem; line-height: 1.7; margin-bottom: 16px; }
+  .summary b { color: #9673b8; }
+
+  .buttons { display: flex; gap: 12px; }
+
+  .hidden { display: none; }
+
+  .confirmation { text-align: center; padding: 20px 0; }
+  .confirmation .ticket-no { font-size: 1.3rem; font-weight: 700; color: #9673b8; margin: 12px 0; }
+  .confirmation p { color: #475569; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Bus Ticket Booking</h1>
+  <span>Book your journey in minutes</span>
+</header>
+
+<main>
+  <!-- Step 1: Search -->
+  <section class="card step active" id="step-search">
+    <h2>Find your bus</h2>
+    <div class="search-form">
+      <select id="from"></select>
+      <select id="to"></select>
+      <input type="date" id="travel-date">
+      <button class="btn" id="btn-search">Search Buses</button>
+    </div>
+  </section>
+
+  <!-- Step 2: Choose bus -->
+  <section class="card step" id="step-buses">
+    <h2>Select a bus</h2>
+    <div id="bus-list"></div>
+    <div class="buttons">
+      <button class="btn secondary" onclick="showStep('step-search')">Back</button>
+    </div>
+  </section>
+
+  <!-- Step 3: Choose seats -->
+  <section class="card step" id="step-seats">
+    <h2>Select your seat</h2>
+    <div id="seat-map" class="seat-map"></div>
+    <div class="seat-legend">
+      <span><span class="legend-box available"></span> Available</span>
+      <span><span class="legend-box selected"></span> Selected</span>
+      <span><span class="legend-box taken"></span> Taken</span>
+    </div>
+    <div class="buttons">
+      <button class="btn secondary" onclick="showStep('step-buses')">Back</button>
+      <button class="btn" id="btn-continue" disabled>Continue</button>
+    </div>
+  </section>
+
+  <!-- Step 4: Passenger details & confirmation -->
+  <section class="card step" id="step-details">
+    <h2>Passenger details</h2>
+    <div class="details-grid">
+      <div>
+        <label for="pass-name">Full name</label>
+        <input type="text" id="pass-name" placeholder="e.g. Alex Chen">
+      </div>
+      <div>
+        <label for="pass-phone">Phone number</label>
+        <input type="tel" id="pass-phone" placeholder="e.g. 555-123-4567">
+      </div>
+      <div>
+        <label for="pass-email">Email</label>
+        <input type="email" id="pass-email" placeholder="e.g. alex@example.com">
+      </div>
+      <div>
+        <label for="pass-id">ID / Passport number</label>
+        <input type="text" id="pass-id" placeholder="e.g. AB123456">
+      </div>
+    </div>
+
+    <div class="summary" id="booking-summary"></div>
+
+    <div class="buttons">
+      <button class="btn secondary" onclick="showStep('step-seats')">Back</button>
+      <button class="btn" id="btn-confirm">Confirm Booking</button>
+    </div>
+  </section>
+
+  <!-- Confirmation -->
+  <section class="card step" id="step-confirmation">
+    <div class="confirmation">
+      <h2>Booking confirmed!</h2>
+      <div class="ticket-no" id="ticket-no"></div>
+      <p id="confirmation-details"></p>
+      <button class="btn" onclick="resetBooking()">Book Another Ticket</button>
+    </div>
+  </section>
+</main>
+
+<script>
+  const CITIES = ['New York', 'Boston', 'Philadelphia', 'Washington DC', 'Baltimore'];
+
+  const BUSES = [
+    { id: 'B1', name: 'Express Line 101', dep: '08:00', arr: '12:30', price: 25, seats: 40 },
+    { id: 'B2', name: 'City Hopper 205', dep: '11:15', arr: '16:00', price: 22, seats: 40 },
+    { id: 'B3', name: 'Night Rider 310', dep: '21:30', arr: '02:15', price: 30, seats: 36 }
+  ];
+
+  // Pseudo-randomly pre-book some seats per bus
+  function takenSeats(bus) {
+    const taken = new Set();
+    const count = Math.floor(bus.seats * 0.3);
+    for (let i = 0; i < count; i++) {
+      taken.add(Math.floor(Math.random() * bus.seats) + 1);
+    }
+    return taken;
+  }
+
+  const takenMap = {}; // busId -> Set of taken seat numbers
+  let selectedBus = null;
+  let selectedSeats = [];
+
+  const $ = (id) => document.getElementById(id);
+
+  function init() {
+    // Populate city selects
+    CITIES.forEach(city => {
+      $('from').insertAdjacentHTML('beforeend', `<option>${city}</option>`);
+      $('to').insertAdjacentHTML('beforeend', `<option>${city}</option>`);
+    });
+    $('to').selectedIndex = 1;
+
+    // Default date to today
+    const today = new Date().toISOString().split('T')[0];
+    $('travel-date').value = today;
+    $('travel-date').min = today;
+
+    // Pre-book seats deterministically per bus
+    BUSES.forEach(b => { takenMap[b.id] = takenSeats(b); });
+  }
+
+  function showStep(id) {
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    $(id).classList.add('active');
+  }
+
+  function renderBuses() {
+    const from = $('from').value;
+    const to = $('to').value;
+    const date = $('travel-date').value;
+
+    if (from === to) {
+      alert('Departure and destination must be different.');
+      return;
+    }
+    if (!date) {
+      alert('Please pick a travel date.');
+      return;
+    }
+
+    const list = $('bus-list');
+    list.innerHTML = '';
+    BUSES.forEach(bus => {
+      const div = document.createElement('div');
+      div.className = 'bus';
+      div.innerHTML = `
+        <div class="bus-info">
+          <div class="bus-name">${bus.name}</div>
+          <div class="bus-meta">${from} → ${to} · ${date} · ${bus.dep} - ${bus.arr}</div>
+          <div class="bus-price">$${bus.price} per seat</div>
+        </div>
+        <button class="btn" onclick="selectBus('${bus.id}')">Select</button>
+      `;
+      list.appendChild(div);
+    });
+    showStep('step-buses');
+  }
+
+  function selectBus(busId) {
+    selectedBus = BUSES.find(b => b.id === busId);
+    selectedSeats = [];
+    renderSeats();
+    showStep('step-seats');
+  }
+
+  function renderSeats() {
+    const map = $('seat-map');
+    map.innerHTML = '';
+    for (let n = 1; n <= selectedBus.seats; n++) {
+      const btn = document.createElement('button');
+      btn.className = 'seat';
+      btn.textContent = n;
+      if (takenMap[selectedBus.id].has(n)) {
+        btn.classList.add('taken');
+        btn.disabled = true;
+      } else {
+        btn.onclick = () => toggleSeat(btn, n);
+      }
+      map.appendChild(btn);
+    }
+    updateContinue();
+  }
+
+  function toggleSeat(btn, n) {
+    if (selectedSeats.includes(n)) {
+      selectedSeats = selectedSeats.filter(s => s !== n);
+      btn.classList.remove('selected');
+    } else {
+      selectedSeats.push(n);
+      btn.classList.add('selected');
+    }
+    updateContinue();
+  }
+
+  function updateContinue() {
+    $('btn-continue').disabled = selectedSeats.length === 0;
+  }
+
+  function renderSummary() {
+    const from = $('from').value;
+    const to = $('to').value;
+    const date = $('travel-date').value;
+    const seatStr = selectedSeats.join(', ');
+    const total = selectedSeats.length * selectedBus.price;
+    $('booking-summary').innerHTML = `
+      <b>${from}</b> → <b>${to}</b> · ${date} · ${selectedBus.dep} - ${selectedBus.arr}<br>
+      Bus: ${selectedBus.name} · Seats: ${seatStr}<br>
+      Total: <b>$${total}</b>
+    `;
+  }
+
+  function confirmBooking() {
+    const name = $('pass-name').value.trim();
+    const phone = $('pass-phone').value.trim();
+    const email = $('pass-email').value.trim();
+
+    if (!name || !phone || !email) {
+      alert('Please fill in your name, phone and email.');
+      return;
+    }
+    if (!email.includes('@')) {
+      alert('Please enter a valid email address.');
+      return;
+    }
+
+    const ticketNo = 'BT-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+
+    // Mark seats as taken
+    selectedSeats.forEach(n => takenMap[selectedBus.id].add(n));
+
+    $('ticket-no').textContent = ticketNo;
+    $('confirmation-details').innerHTML = `
+      ${$('from').value} → ${$('to').value} · ${$('travel-date').value}<br>
+      ${selectedBus.name} · ${selectedBus.dep} - ${selectedBus.arr}<br>
+      Seats: ${selectedSeats.join(', ')} · Total: $${selectedSeats.length * selectedBus.price}<br>
+      Passenger: ${name} · ${email}
+    `;
+    showStep('step-confirmation');
+  }
+
+  function resetBooking() {
+    selectedBus = null;
+    selectedSeats = [];
+    ['pass-name', 'pass-phone', 'pass-email', 'pass-id'].forEach(id => $(id).value = '');
+    showStep('step-search');
+  }
+
+  // Wire up events
+  $('btn-search').addEventListener('click', renderBuses);
+  $('btn-continue').addEventListener('click', () => {
+    renderSummary();
+    showStep('step-details');
+  });
+  $('btn-confirm').addEventListener('click', confirmBooking);
+
+  init();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(node -e \" const fs = require('fs'); const html = fs.readFileSync('maison-velour.html','utf8'); const m = html.match(/<script>([\\s\\S]*?)<\\/script>/); let src = m[1]; const cut = src.indexOf('/* ---------- Render: shop'); fs.writeFileSync('/tmp/mv_data2.js', src.slice(0, cut) + '\\n;globalThis.__MV={FEEDBACK,tagCounts,themeLabels,interestNames};'); \" && node -e \" global.localStorage = {getItem:()=>null,setItem:()=>{}}; require('/tmp/mv_data2.js'); const {FEEDBACK,tagCounts,themeLabels,interestNames} = globalThis.__MV; const ranked = Object.keys(tagCounts).sort((a,b)=>tagCounts[b]-tagCounts[a]); console.log('Reviews:', FEEDBACK.length); console.log('Avg rating:', (FEEDBACK.reduce((s,f)=>s+f.rating,0)/FEEDBACK.length).toFixed(1)); console.log('Top 3 themes:', ranked.slice(0,3).map(t=>themeLabels[t].title+' ('+tagCounts[t]+')').join(' | ')); const groups = {}; FEEDBACK.forEach(f=>(groups[f.interest]=groups[f.interest]||[]).push(f)); console.log('Interest groups:', Object.keys(groups).map(g=>g+'='+groups[g].length).join(', ')); \")"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

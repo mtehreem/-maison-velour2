@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit
+.env
+
+# Local database (now migrated to Supabase)
+maison-velour.db
+
+# OS junk
+.DS_Store

@@ -1,0 +1,399 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maison Velour — Admin Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1c1a17; --ink-soft:#6f675d; --noir:#0e0d0b; --noir-deep:#080706;
+    --gold:#c5a059; --gold-bright:#e5c07b; --gold-deep:#9a7434; --gold-soft:#f7efe0;
+    --ivory:#fbf7f1; --cream:#f6f1e8; --white:#fff; --success:#3e8a63; --error:#b3403f;
+    --serif:'Playfair Display', Georgia, serif; --sans:'Jost','Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-weight:300;line-height:1.6}
+  .topbar{background:var(--noir-deep);color:var(--gold-bright);text-align:center;font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;padding:9px 16px}
+  header{
+    background:var(--white);border-bottom:1px solid rgba(197,160,89,.25);
+    display:flex;align-items:center;justify-content:space-between;padding:14px 28px;
+  }
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--serif);font-size:1.25rem;font-weight:700;color:var(--noir);text-transform:uppercase;letter-spacing:.04em}
+  .brand .mark{width:36px;height:36px;border-radius:10px;background:linear-gradient(160deg,var(--noir),#241f17);display:grid;place-items:center;color:var(--gold-bright)}
+  .brand .mark svg{width:19px;height:19px}
+  .brand small{font-family:var(--sans);font-size:.56rem;letter-spacing:.34em;color:var(--gold);text-transform:uppercase;display:block;font-weight:400}
+  .admin-badge{font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--gold-deep);border:1px solid rgba(197,160,89,.5);border-radius:999px;padding:6px 14px;font-weight:500}
+  .logout-btn{background:none;border:1px solid rgba(179,64,63,.5);color:var(--error);border-radius:999px;padding:8px 18px;font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;font-weight:600;cursor:pointer;transition:all .2s}
+  .logout-btn:hover{background:var(--error);color:#fff}
+  .wrap{max-width:1200px;margin:0 auto;padding:30px 24px 60px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px}
+  .tab{border:1px solid rgba(197,160,89,.4);border-radius:999px;padding:10px 22px;font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);font-weight:500;cursor:pointer;background:var(--white);transition:all .2s}
+  .tab.active{background:var(--noir);color:var(--gold-bright);border-color:var(--noir)}
+  .panel{display:none}
+  .panel.show{display:block;animation:panelIn .25s ease}
+  @keyframes panelIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  .panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px}
+  .panel-head h2{font-family:var(--serif);font-size:1.5rem;color:var(--noir)}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;
+    background:linear-gradient(135deg,var(--gold-bright),var(--gold-deep));color:#241c0e;
+    border-radius:999px;padding:10px 20px;font-size:.76rem;letter-spacing:.12em;text-transform:uppercase;font-weight:600;
+    transition:transform .2s;font-family:var(--sans);
+  }
+  .btn:hover{transform:translateY(-1px)}
+  .btn.small{padding:7px 14px;font-size:.68rem}
+  .btn.ghost{background:transparent;border:1px solid rgba(197,160,89,.5);color:var(--gold-deep)}
+  .btn.danger{background:linear-gradient(135deg,#c0392b,#8e1f1a);color:#fff}
+  .card{background:var(--white);border:1px solid rgba(197,160,89,.22);border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 4px 14px -8px rgba(14,13,11,.12)}
+  table{width:100%;border-collapse:collapse;font-size:.86rem}
+  th{text-align:left;font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold-deep);font-weight:600;padding:8px 10px;border-bottom:1px solid rgba(197,160,89,.3)}
+  td{padding:10px;border-bottom:1px solid rgba(14,13,11,.06);vertical-align:middle}
+  tr:hover td{background:var(--gold-soft)}
+  input[type=text],input[type=number],input[type=email],input[type=password],select{
+    font-family:var(--sans);font-size:.9rem;border:1px solid rgba(197,160,89,.45);border-radius:10px;
+    padding:9px 12px;background:var(--white);color:var(--ink);width:100%;
+  }
+  input:focus,select:focus{outline:2px solid var(--gold-soft);border-color:var(--gold)}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .form-row label{display:block;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);font-weight:500;margin-bottom:5px}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(8,7,6,.55);backdrop-filter:blur(3px);display:none;z-index:90;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 20px}
+  .modal-backdrop.show{display:flex}
+  .modal{background:var(--ivory);border-radius:18px;max-width:620px;width:100%;box-shadow:0 30px 80px rgba(0,0,0,.4);padding:26px 30px}
+  .modal h3{font-family:var(--serif);color:var(--noir);font-size:1.3rem;margin-bottom:18px}
+  .modal .form-row{margin-bottom:12px}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+  .status-pill{display:inline-block;border-radius:999px;padding:4px 12px;font-size:.7rem;letter-spacing:.06em;font-weight:600}
+  .status-new{background:var(--gold-soft);color:var(--gold-deep)}
+  .status-transit{background:#e3f0ff;color:#2b6cb0}
+  .status-done{background:#e3f5ea;color:var(--success)}
+  .empty{text-align:center;color:var(--ink-soft);padding:30px 0;font-size:.88rem}
+  .login-screen{position:fixed;inset:0;background:var(--noir-deep);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
+  .login-card{background:var(--ivory);border-radius:20px;padding:36px 34px;max-width:400px;width:100%;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  .login-card .mark{width:52px;height:52px;border-radius:14px;background:linear-gradient(160deg,var(--noir),#241f17);display:grid;place-items:center;color:var(--gold-bright);margin:0 auto 16px}
+  .login-card .mark svg{width:26px;height:26px}
+  .login-card h1{font-family:var(--serif);text-align:center;color:var(--noir);font-size:1.4rem;margin-bottom:6px}
+  .login-card p{text-align:center;color:var(--ink-soft);font-size:.82rem;margin-bottom:20px}
+  .login-card .form-row{margin-bottom:12px}
+  .login-card .btn{width:100%;justify-content:center;padding:13px}
+  .login-hint{text-align:center;font-size:.72rem;color:var(--ink-soft);margin-top:14px;border-top:1px dashed rgba(197,160,89,.4);padding-top:12px}
+  @media(max-width:720px){.grid-2,.grid-3{grid-template-columns:1fr} .wrap{padding:20px 14px 50px}}
+</style>
+</head>
+<body>
+<div class="topbar">Maison Velour · Administration</div>
+<header>
+  <div class="brand">
+    <span class="mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v3"/><path d="M9 6h6"/><path d="M10 6c-.6 2.2-1.6 3.8-2.4 5.4-.6 1.2-.9 2.3-.9 3.6H7"/>
+        <path d="M14 6c.6 2.2 1.6 3.8 2.4 5.4.6 1.2.9 2.3.9 3.6h1"/><path d="M8.5 12h7"/>
+        <path d="M9 15.6 12 22l3-6.4"/><path d="M12 22v-6.4"/><path d="M9 12.6h6"/><path d="M10 9h4"/>
+      </svg>
+    </span>
+    <div>Maison Velour<small>Admin Panel</small></div>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <span class="admin-badge" id="adminName">—</span>
+    <button class="logout-btn" id="logoutBtn">Log Out</button>
+  </div>
+</header>
+
+<!-- Login screen -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v3"/><path d="M9 6h6"/><path d="M10 6c-.6 2.2-1.6 3.8-2.4 5.4-.6 1.2-.9 2.3-.9 3.6H7"/>
+        <path d="M14 6c.6 2.2 1.6 3.8 2.4 5.4.6 1.2.9 2.3.9 3.6h1"/><path d="M8.5 12h7"/>
+        <path d="M9 15.6 12 22l3-6.4"/><path d="M12 22v-6.4"/><path d="M9 12.6h6"/><path d="M10 9h4"/>
+      </svg>
+    </div>
+    <h1>Admin Login</h1>
+    <p>Sign in with an administrator account</p>
+    <div class="form-row"><label>Email</label><input type="email" id="adminEmail" placeholder="admin@maisonvelour.com"></div>
+    <div class="form-row"><label>Password</label><input type="password" id="adminPass" placeholder="••••••••"></div>
+    <button class="btn" id="adminLoginBtn">Sign In</button>
+    <div class="login-hint">Default: admin@maisonvelour.com / admin123</div>
+  </div>
+</div>
+
+<div class="wrap" id="mainApp" style="display:none">
+  <div class="tabs">
+    <button class="tab active" data-tab="products">Products</button>
+    <button class="tab" data-tab="orders">Orders</button>
+    <button class="tab" data-tab="wishlist">Wishlist</button>
+    <button class="tab" data-tab="users">Users</button>
+  </div>
+
+  <!-- Products -->
+  <div class="panel show" id="panel-products">
+    <div class="panel-head">
+      <h2>Manage Products</h2>
+      <button class="btn" id="addProductBtn">+ Add Product</button>
+    </div>
+    <div id="productsTable"></div>
+  </div>
+
+  <!-- Orders -->
+  <div class="panel" id="panel-orders">
+    <div class="panel-head"><h2>Manage Orders</h2></div>
+    <div id="ordersTable"></div>
+  </div>
+
+  <!-- Wishlist -->
+  <div class="panel" id="panel-wishlist">
+    <div class="panel-head"><h2>Wishlist Entries</h2></div>
+    <div id="wishlistTable"></div>
+  </div>
+
+  <!-- Users -->
+  <div class="panel" id="panel-users">
+    <div class="panel-head"><h2>Manage Users</h2></div>
+    <div id="usersTable"></div>
+  </div>
+</div>
+
+<!-- Product modal -->
+<div class="modal-backdrop" id="productModal">
+  <div class="modal">
+    <h3 id="pmTitle">Add Product</h3>
+    <input type="hidden" id="pmId">
+    <div class="grid-2">
+      <div class="form-row"><label>Name</label><input type="text" id="pmName"></div>
+      <div class="form-row"><label>Category</label><select id="pmCat">
+        <option>Skincare</option><option>Makeup</option><option>Fragrance</option><option>Hair & Body</option>
+      </select></div>
+    </div>
+    <div class="grid-2">
+      <div class="form-row"><label>Price ($)</label><input type="number" id="pmPrice" step="0.01"></div>
+      <div class="form-row"><label>Was ($, 0 = none)</label><input type="number" id="pmWas" step="0.01"></div>
+    </div>
+    <div class="grid-2">
+      <div class="form-row"><label>Color 1</label><input type="text" id="pmArt1" placeholder="#e9dcf0"></div>
+      <div class="form-row"><label>Color 2</label><input type="text" id="pmArt2" placeholder="#b79ac4"></div>
+    </div>
+    <div class="form-row"><label>Image URL (optional)</label><input type="text" id="pmImage" placeholder="https://images.unsplash.com/photo-..."></div>
+    <div class="form-row"><label>Badge (optional)</label><input type="text" id="pmBadge" placeholder="e.g. New, Limited"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="pmCancel">Cancel</button>
+      <button class="btn" id="pmSave">Save Product</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:4321/api';
+let token = localStorage.getItem('mv_admin_token') || '';
+
+async function api(path, opts = {}){
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers||{}) };
+  if(token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API + path, { method: opts.method||'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if(res.status === 401 || res.status === 403) { /* keep login screen */ }
+  return data;
+}
+
+/* HTML-escape user-supplied values before interpolating into innerHTML (prevents XSS) */
+function esc(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ---- Auth ---- */
+async function initAuth(){
+  if(token){
+    const me = await api('/me');
+    if(me && me.ok && me.user.is_admin === 1){
+      document.getElementById('adminName').textContent = me.user.name;
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('mainApp').style.display = '';
+      refreshAll();
+      return;
+    }
+  }
+  document.getElementById('loginScreen').style.display = 'flex';
+}
+document.getElementById('adminLoginBtn').addEventListener('click', async () => {
+  const email = document.getElementById('adminEmail').value.trim();
+  const pass = document.getElementById('adminPass').value;
+  const r = await api('/login', { method:'POST', body:{ email, pass } });
+  if(r && r.ok && r.user.is_admin === 1){
+    token = r.token;
+    localStorage.setItem('mv_admin_token', token);
+    document.getElementById('adminName').textContent = r.user.name;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('mainApp').style.display = '';
+    refreshAll();
+  } else {
+    alert('Login failed — admin credentials required.');
+  }
+});
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await api('/logout', { method:'POST' });
+  token = ''; localStorage.removeItem('mv_admin_token');
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('mainApp').style.display = 'none';
+});
+
+/* ---- Tabs ---- */
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('show'));
+  document.getElementById('panel-' + t.dataset.tab).classList.add('show');
+  if(t.dataset.tab === 'products') loadProducts();
+  if(t.dataset.tab === 'orders') loadOrders();
+  if(t.dataset.tab === 'wishlist') loadWishlist();
+  if(t.dataset.tab === 'users') loadUsers();
+}));
+
+/* ---- Products ---- */
+async function loadProducts(){
+  const r = await api('/admin/products', { method:'GET' });
+  const rows = r.ok ? r.products : [];
+  PRODUCTS_CACHE = rows;
+  if(!rows.length){ document.getElementById('productsTable').innerHTML = '<div class="empty">No products yet.</div>'; return; }
+  document.getElementById('productsTable').innerHTML = `
+    <table><thead><tr><th>ID</th><th></th><th>Name</th><th>Category</th><th>Price</th><th>Was</th><th>Badge</th><th></th></tr></thead>
+    <tbody>${rows.map(p => `<tr>
+      <td>${esc(p.id)}</td>
+      <td>${p.image ? `<img src="${esc(p.image)}" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:8px">` : esc(p.glyph)}</td>
+      <td>${esc(p.name)}</td><td>${esc(p.cat)}</td><td>$${Number(p.price).toFixed(2)}</td>
+      <td>${p.was ? '$' + Number(p.was).toFixed(2) : '—'}</td><td>${esc(p.badge || '—')}</td>
+      <td><button class="btn small ghost" onclick="editProduct(${p.id})">Edit</button>
+          <button class="btn small danger" onclick="deleteProduct(${p.id})">Delete</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function refreshAll(){ await Promise.all([loadProducts(), loadOrders(), loadWishlist(), loadUsers()]); }
+function editProduct(id){
+  const p = PRODUCTS_CACHE.find(x => x.id === id);
+  if(!p) return;
+  document.getElementById('pmTitle').textContent = 'Edit Product';
+  document.getElementById('pmId').value = p.id;
+  document.getElementById('pmName').value = p.name;
+  document.getElementById('pmCat').value = p.cat;
+  document.getElementById('pmPrice').value = p.price;
+  document.getElementById('pmWas').value = p.was || 0;
+  document.getElementById('pmArt1').value = p.art1 || '#fff';
+  document.getElementById('pmArt2').value = p.art2 || '#000';
+  document.getElementById('pmImage').value = p.image || '';
+  document.getElementById('pmBadge').value = p.badge || '';
+  document.getElementById('productModal').classList.add('show');
+}
+async function deleteProduct(id){
+  if(!confirm('Delete this product?')) return;
+  await api('/admin/products', { method:'DELETE', body:{ id } });
+  await loadProducts();
+}
+let PRODUCTS_CACHE = [];
+document.getElementById('addProductBtn').addEventListener('click', () => {
+  document.getElementById('pmTitle').textContent = 'Add Product';
+  ['pmId','pmName','pmPrice','pmWas','pmArt1','pmArt2','pmImage','pmBadge'].forEach(i => document.getElementById(i).value = '');
+  document.getElementById('pmCat').value = 'Skincare';
+  document.getElementById('productModal').classList.add('show');
+});
+document.getElementById('pmCancel').addEventListener('click', () => document.getElementById('productModal').classList.remove('show'));
+document.getElementById('pmSave').addEventListener('click', async () => {
+  const name = document.getElementById('pmName').value.trim();
+  if(!name){ alert('Product name is required.'); return; }
+  const body = {
+    id: Number(document.getElementById('pmId').value) || undefined,
+    name,
+    cat: document.getElementById('pmCat').value,
+    price: Number(document.getElementById('pmPrice').value) || 0,
+    was: Number(document.getElementById('pmWas').value) || 0,
+    glyph: '✦',
+    art1: document.getElementById('pmArt1').value || '#fff',
+    art2: document.getElementById('pmArt2').value || '#000',
+    image: document.getElementById('pmImage').value.trim(),
+    badge: document.getElementById('pmBadge').value
+  };
+  const r = body.id
+    ? await api('/admin/products', { method:'PUT', body })
+    : await api('/admin/products', { method:'POST', body });
+  if(r && r.ok){
+    document.getElementById('productModal').classList.remove('show');
+    await loadProducts();
+  } else {
+    alert('Save failed: ' + ((r && r.error) || 'server unreachable — is node server.js running?'));
+  }
+});
+
+/* ---- Orders ---- */
+async function loadOrders(){
+  const r = await api('/admin/orders', { method:'GET' });
+  const rows = r.ok ? r.orders : [];
+  if(!rows.length){ document.getElementById('ordersTable').innerHTML = '<div class="empty">No orders yet.</div>'; return; }
+  const pill = s => {
+    const es = esc(s);
+    if(/done|deliver|complete/i.test(s)) return '<span class="status-pill status-done">' + es + '</span>';
+    if(/transit|ship/i.test(s)) return '<span class="status-pill status-transit">' + es + '</span>';
+    return '<span class="status-pill status-new">' + es + '</span>';
+  };
+  document.getElementById('ordersTable').innerHTML = `
+    <table><thead><tr><th>Order</th><th>Email</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows.map(o => `<tr>
+      <td>${esc(o.num)}</td><td>${esc(o.email)}</td><td>${esc(o.items)}</td><td>$${Number(o.total).toFixed(2)}</td>
+      <td>${pill(o.status)}</td>
+      <td><select onchange="setOrderStatus('${esc(o.num)}', this.value)" style="width:auto;padding:6px 10px">
+        <option ${/in transit/i.test(o.status)?'selected':''}>In transit 🚚</option>
+        <option ${/out for delivery/i.test(o.status)?'selected':''}>Out for delivery 📦</option>
+        <option ${/delivered/i.test(o.status)?'selected':''}>Delivered ✅</option>
+      </select>
+      <button class="btn small danger" onclick="deleteOrder('${esc(o.num)}')">Delete</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function setOrderStatus(num, status){ await api('/admin/orders', { method:'PUT', body:{ num, status } }); await loadOrders(); }
+async function deleteOrder(num){ if(!confirm('Delete order ' + num + '?')) return; await api('/admin/orders', { method:'DELETE', body:{ num } }); await loadOrders(); }
+
+/* ---- Wishlist ---- */
+async function loadWishlist(){
+  const r = await api('/admin/wishlist', { method:'GET' });
+  const rows = r.ok ? r.wishlist : [];
+  if(!rows.length){ document.getElementById('wishlistTable').innerHTML = '<div class="empty">No wishlist entries yet.</div>'; return; }
+  document.getElementById('wishlistTable').innerHTML = `
+    <table><thead><tr><th>ID</th><th>Session</th><th>Product</th><th>Price</th><th></th></tr></thead>
+    <tbody>${rows.map(w => `<tr>
+      <td>${esc(w.id)}</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(w.session_token)}</td>
+      <td>${esc(w.product_name)}</td><td>$${Number(w.price).toFixed(2)}</td>
+      <td><button class="btn small danger" onclick="deleteWish(${w.id})">Delete</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function deleteWish(id){
+  if(!confirm('Delete this wishlist entry?')) return;
+  const r = await api('/admin/wishlist', { method:'GET' });
+  const row = (r.ok ? r.wishlist : []).find(x => x.id === id);
+  if(row){
+    await fetch(API + '/wishlist', { method:'DELETE', headers:{ 'Content-Type':'application/json', 'x-session': row.session_token }, body: JSON.stringify({ product_id: row.product_id }) });
+  }
+  await loadWishlist();
+}
+
+/* ---- Users ---- */
+async function loadUsers(){
+  const r = await api('/admin/users', { method:'GET' });
+  const rows = r.ok ? r.users : [];
+  if(!rows.length){ document.getElementById('usersTable').innerHTML = '<div class="empty">No users yet.</div>'; return; }
+  document.getElementById('usersTable').innerHTML = `
+    <table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Admin</th><th>Joined</th><th></th></tr></thead>
+    <tbody>${rows.map(u => `<tr>
+      <td>${esc(u.id)}</td><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.phone || '—')}</td>
+      <td>${u.is_admin ? '✅' : '—'}</td><td>${esc(u.created_at)}</td>
+      <td><button class="btn small ghost" onclick="toggleAdmin(${u.id}, ${u.is_admin ? 0 : 1})">${u.is_admin ? 'Remove admin' : 'Make admin'}</button>
+      ${!u.is_admin ? `<button class="btn small danger" onclick="deleteUser(${u.id})">Delete</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+async function toggleAdmin(id, val){ await api('/admin/users', { method:'PUT', body:{ id, is_admin: val } }); await loadUsers(); }
+async function deleteUser(id){ if(!confirm('Delete this user?')) return; await api('/admin/users', { method:'DELETE', body:{ id } }); await loadUsers(); }
+
+initAuth();
+</script>
+</body>
+</html>
