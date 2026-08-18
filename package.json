@@ -1,11 +1,14 @@
 {
   "name": "vibe_coding",
   "version": "1.0.0",
-  "description": "The website is backed by a **local SQLite database** via a tiny Node API server (zero dependencies, uses Node's built-in `node:sqlite`).",
-  "main": "db.js",
+  "description": "Maison Velour — Supabase-backed storefront with a Node API (Vercel serverless).",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   },
   "keywords": [],
   "author": "",
