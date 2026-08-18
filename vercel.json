@@ -2,6 +2,6 @@
   "version": 2,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/[[...slug]]" },
-    { "source": "/(.*)", "destination": "/maison-velour.html" }
+    { "source": "/", "destination": "/maison-velour.html" }
   ]
 }
