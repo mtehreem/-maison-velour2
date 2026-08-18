@@ -9,3 +9,4 @@ maison-velour.db
 
 # OS junk
 .DS_Store
+.vercel

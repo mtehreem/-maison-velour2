@@ -49,4 +49,3 @@ The website is backed by a **cloud Supabase (Postgres) database** via a small No
 
 - The site degrades gracefully: if the server isn't running, everything (login, cart, orders, wishlist) continues to work via `localStorage`.
 - For a real production launch: hash passwords, restrict RLS further, and use HTTPS.
-  .
