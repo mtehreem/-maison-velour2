@@ -381,6 +381,22 @@
   .member-card h3{font-family:var(--serif);font-size:1.25rem;color:var(--noir);font-weight:600}
   .member-card p{font-size:.82rem;color:var(--ink-soft)}
   .member-note{font-size:.8rem;color:var(--ink-soft);line-height:1.6;margin-bottom:18px}
+  .member-orders{margin:0 0 20px;text-align:left}
+  .member-orders h4{font-family:var(--serif);color:var(--noir);font-size:1rem;font-weight:500;margin-bottom:10px}
+  .mo-list{display:grid;gap:8px;max-height:260px;overflow-y:auto}
+  .mo-row{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    border:1px solid rgba(197,160,89,.35);border-radius:10px;padding:10px 12px;background:var(--white);
+  }
+  .mo-num{font-weight:500;color:var(--noir);font-size:.84rem;letter-spacing:.02em}
+  .mo-meta{font-size:.74rem;color:var(--ink-soft);margin-top:3px}
+  .mo-pill{
+    font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;
+    padding:3px 9px;border-radius:999px;white-space:nowrap;
+  }
+  .mo-paid{background:rgba(62,138,99,.12);color:var(--success)}
+  .mo-unpaid{background:rgba(179,64,63,.10);color:var(--error)}
+  .mo-empty{font-size:.8rem;color:var(--ink-soft)}
   .lc-btn.ghost{
     background:transparent;border:1px solid rgba(179,64,63,.5);color:var(--error);
     box-shadow:none;
@@ -1729,6 +1745,10 @@
         </div>
       </div>
       <p class="member-note">You are signed in as a Maison Velour member. Your orders, cart and wishlist are synced to this account.</p>
+      <div class="member-orders">
+        <h4>Your Orders</h4>
+        <div id="memberOrdersList"><p class="mo-empty">Loading your orders…</p></div>
+      </div>
       <button class="lc-btn ghost" id="memberLogoutBtn">Log Out</button>
     </div>
   </div>
@@ -2570,6 +2590,9 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
       }
     });
     if(co && co.ok && co.url){
+      // Remembered so that if the shopper abandons Safepay — or the card is
+      // declined — we can tell them what happened when they come back.
+      try { localStorage.setItem('mv_pending_checkout', JSON.stringify({ num: co.num, tracker: co.tracker, ts: Date.now() })); } catch(e){}
       window.location.href = co.url;   // leaving the page — keep the button disabled
       return;
     }
@@ -2795,6 +2818,42 @@ function closeLoginPage(){
   loginPage.classList.remove('show');
   unlockScroll();
 }
+// The order-history endpoint already existed but nothing in the storefront called
+// it, so a signed-in member had no way to see what they had ordered or whether a
+// card payment had settled.
+async function loadMemberOrders(){
+  const box = document.getElementById('memberOrdersList');
+  if(!box) return;
+  if(!SESSION.token){ box.innerHTML = ''; return; }
+  box.innerHTML = '<p class="mo-empty">Loading your orders…</p>';
+  const r = await DB.call('/orders', { headers: { Authorization: 'Bearer ' + SESSION.token } });
+  if(!r || !r.ok){
+    box.innerHTML = '<p class="mo-empty">We could not load your orders right now.</p>';
+    return;
+  }
+  const orders = r.orders || [];
+  if(!orders.length){
+    box.innerHTML = '<p class="mo-empty">No orders yet — your first piece is waiting to be discovered.</p>';
+    return;
+  }
+  box.innerHTML = '<div class="mo-list">' + orders.map(o => {
+    const status = String(o.payment_status || 'unpaid').toLowerCase();
+    const paid = status === 'paid';
+    const method = o.payment_method === 'cod' ? 'Cash on Delivery'
+                 : o.payment_method === 'card' ? 'Card'
+                 : (o.payment_method || '—');
+    const when = o.date ? new Date(o.date).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '';
+    const qty = Number(o.items) || 0;
+    return `<div class="mo-row">
+      <div>
+        <div class="mo-num">${esc(o.num)}</div>
+        <div class="mo-meta">${esc(when)} · ${esc(method)} · ${qty} item${qty === 1 ? '' : 's'} · ${fmt(o.total)}</div>
+      </div>
+      <span class="mo-pill ${paid ? 'mo-paid' : 'mo-unpaid'}">${esc(paid ? 'Paid' : status)}</span>
+    </div>`;
+  }).join('') + '</div>';
+}
+
 function renderMemberState(){
   const loggedIn = SESSION.token && SESSION.user;
   // profile button: avatar state
@@ -2819,6 +2878,7 @@ function renderMemberState(){
     if(mh) mh.querySelector('.lh-eyebrow').textContent = 'Maison Velour · Member';
     if(mh) mh.querySelector('h1').textContent = 'BONJOUR';
     if(mh) mh.querySelector('p').textContent = 'Welcome back — manage your account and orders.';
+    loadMemberOrders();
   } else {
     const mh = document.getElementById('memberHead');
     if(mh){
@@ -2872,6 +2932,9 @@ document.getElementById('lpLoginBtn').addEventListener('click', async () => {
     await loadWishlist();          // load the user's cloud wishlist
     await loadCartFromDB();        // load the user's cloud cart
     try { await DB.call('/wishlist/merge', { method:'POST', headers:{ Authorization:'Bearer ' + dbRes.token } }); await loadWishlist(); } catch(e){}
+    // Refresh the member panel now rather than waiting for it to be reopened,
+    // so the account name and order history appear straight after signing in.
+    renderMemberState();
     closeLoginPage();
     notify({
       type:'success',
@@ -3482,17 +3545,65 @@ const DB = {
 // cancel_url we handed it. The webhook is still what guarantees an order is
 // settled; this only makes the confirmation screen accurate without waiting,
 // which also covers local testing where a webhook cannot reach the machine.
+const PENDING_KEY = 'mv_pending_checkout';
+function clearPendingCheckout(){ try { localStorage.removeItem(PENDING_KEY); } catch(e){} }
+function readPendingCheckout(){
+  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch(e){ return null; }
+}
+
+function showPaidConfirmation(order){
+  cart = []; persistCart(); renderCart();
+  const num = (order && order.num) || '';
+  document.getElementById('orderNum').textContent = 'Order ' + num;
+  document.getElementById('checkoutView').style.display = 'none';
+  document.getElementById('successView').style.display = 'block';
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('cartDrawer').classList.remove('show');
+  checkoutModal.classList.add('show');
+  lockScroll();
+  notify({ type:'success', title:'Payment received', msg:'Order ' + esc(num) + ' is confirmed. A receipt is on its way.', duration: 9000 });
+}
+
+// Shown when the shopper comes back without a tracker in the URL — they closed
+// Safepay, or their card was declined and they navigated back. Safepay owns the
+// page they were on, so without this they got no feedback from us at all.
+async function checkAbandonedPayment(){
+  const pending = readPendingCheckout();
+  if(!pending || !pending.tracker) return;
+  // Never nag about something from days ago.
+  if(Date.now() - (pending.ts || 0) > 24 * 60 * 60 * 1000){ clearPendingCheckout(); return; }
+
+  const r = await DB.call('/checkout/status?tracker=' + encodeURIComponent(pending.tracker));
+  if(!r || !r.ok) return;
+  if(r.paid){ clearPendingCheckout(); showPaidConfirmation(r.order); return; }
+
+  const status = String((r.order && r.order.payment_status) || 'unpaid').toLowerCase();
+  clearPendingCheckout();
+  if(status === 'failed'){
+    notify({ type:'error', title:'Your card was declined', msg:'No payment was taken for order ' + esc(pending.num || '') + '. Please try another card, or choose cash on delivery.', duration: 13000 });
+  } else {
+    notify({ type:'info', title:'Payment not completed', msg:'Order ' + esc(pending.num || '') + ' is still unpaid. Your bag is saved if you would like to try again.', duration: 12000 });
+  }
+}
+
 async function handleSafepayReturn(){
   const params = new URLSearchParams(location.search);
 
   if(params.get('safepay') === 'cancel'){
     history.replaceState(null, '', location.pathname);
-    notify({ type:'info', title:'Payment cancelled', msg:'No payment was taken and your bag is still here.', duration: 9000 });
+    const pending = readPendingCheckout();
+    clearPendingCheckout();
+    notify({
+      type:'info',
+      title:'Payment cancelled',
+      msg:'No payment was taken' + (pending && pending.num ? ' for order ' + esc(pending.num) : '') + ' and your bag is still here.',
+      duration: 9000
+    });
     return;
   }
 
   const tracker = params.get('tracker');
-  if(!tracker) return;
+  if(!tracker){ await checkAbandonedPayment(); return; }
   // Drop the query string so refreshing does not re-check a settled payment.
   history.replaceState(null, '', location.pathname);
 
@@ -3500,18 +3611,22 @@ async function handleSafepayReturn(){
   const num = (r && r.order && r.order.num) || '';
 
   if(r && r.ok && r.paid){
-    cart = []; persistCart(); renderCart();
-    document.getElementById('orderNum').textContent = 'Order ' + num;
-    document.getElementById('checkoutView').style.display = 'none';
-    document.getElementById('successView').style.display = 'block';
-    document.getElementById('overlay').classList.remove('show');
-    document.getElementById('cartDrawer').classList.remove('show');
-    checkoutModal.classList.add('show');
-    lockScroll();
-    notify({ type:'success', title:'Payment received', msg:'Order ' + esc(num) + ' is confirmed. A receipt is on its way.', duration: 9000 });
+    clearPendingCheckout();
+    showPaidConfirmation(r.order);
     return;
   }
 
+  const status = String((r && r.order && r.order.payment_status) || 'unpaid').toLowerCase();
+  clearPendingCheckout();
+  if(status === 'failed'){
+    notify({
+      type:'error',
+      title:'Your card was declined',
+      msg:'No payment was taken for order ' + esc(num) + '. Please try another card, or choose cash on delivery.',
+      duration: 13000
+    });
+    return;
+  }
   notify({
     type:'error',
     title:'Payment not confirmed',

@@ -71,6 +71,14 @@
   .status-new{background:var(--gold-soft);color:var(--gold-deep)}
   .status-transit{background:#e3f0ff;color:#2b6cb0}
   .status-done{background:#e3f5ea;color:var(--success)}
+  /* The Safepay tracker, shown under the payment method so an order can be looked
+     up directly in the Safepay dashboard. Click to select the whole id. */
+  .pay-ref{
+    display:block;margin-top:5px;font-size:.66rem;line-height:1.3;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:var(--ink-soft);word-break:break-all;cursor:pointer;max-width:180px;
+  }
+  .pay-ref:hover{color:var(--gold-deep)}
   .empty{text-align:center;color:var(--ink-soft);padding:30px 0;font-size:.88rem}
   .login-screen{position:fixed;inset:0;background:var(--noir-deep);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
   .login-card{background:var(--ivory);border-radius:20px;padding:36px 34px;max-width:400px;width:100%;box-shadow:0 30px 80px rgba(0,0,0,.5)}
@@ -342,9 +350,20 @@ async function loadOrders(){
   const pay = o => {
     const method = payLabels[o.payment_method] || o.payment_method || '—';
     const paid = String(o.payment_status || 'unpaid').toLowerCase() === 'paid';
+    const ref = o.payment_ref
+      ? `<span class="pay-ref" title="Safepay tracker — click to select" onclick="selectText(this)">${esc(o.payment_ref)}</span>`
+      : '';
     return esc(method) + ' ' + (paid
       ? '<span class="status-pill status-done">paid</span>'
-      : '<span class="status-pill status-new">unpaid</span>');
+      : '<span class="status-pill status-new">unpaid</span>') + ref;
+  };
+  // One click selects the whole tracker so it can be pasted into Safepay.
+  window.selectText = el => {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
   };
   document.getElementById('ordersTable').innerHTML = `
     <table><thead><tr><th>Order</th><th>Customer</th><th>Ship to</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th></th></tr></thead>

@@ -49,6 +49,7 @@ account. It is safe to re-run.
 | `scripts/schema.sql` | Table definitions, indexes, and Row Level Security. |
 | `scripts/seed.js` | Creates the schema and seeds the catalogue + admin user. |
 | `vercel.json` | Routes `/api/*` to the serverless function. |
+| `PAYMENTS.md` | **Card payments** — how the flow works, where to watch payments, and how to go live. |
 | `.env` | **Secret.** Database credentials. Never commit this. |
 
 Files starting with `_` inside `api/` are shared modules, not routes.
