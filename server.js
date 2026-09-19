@@ -1,18 +1,18 @@
-// Maison Velour — local dev server
-// Serves the static site AND the API, backed by Supabase.
-// The API logic lives in api-handler.js, shared with the Vercel serverless
-// function (api/[[...slug]].js), so behavior is identical in both places.
+// Maison Velour — local dev server.
+// Serves the static site from public/ (the same folder Vercel publishes) and
+// hands everything under /api to the shared handler, so local behaviour matches
+// production exactly.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { handleApi } = require('./api-handler');
+const { handleApi } = require('./api/_handler');
 
 const PORT = process.env.PORT || 4321;
-const STATIC_ROOT = __dirname;
+const STATIC_ROOT = path.join(__dirname, 'public');
 const MIME = {
   '.html':'text/html', '.css':'text/css', '.js':'application/javascript', '.json':'application/json',
   '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.gif':'image/gif', '.webp':'image/webp',
-  '.svg':'image/svg+xml', '.ico':'image/x-icon'
+  '.svg':'image/svg+xml', '.ico':'image/x-icon', '.mp3':'audio/mpeg', '.mp4':'video/mp4'
 };
 
 function send(res, code, data){
@@ -22,7 +22,8 @@ function send(res, code, data){
 }
 
 function serveStatic(res, pathname){
-  let rel = pathname === '/' ? 'maison-velour.html' : pathname.replace(/^\/+/, '');
+  let rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  if(rel === 'maison-velour.html') rel = 'index.html';   // legacy URL
   const file = path.join(STATIC_ROOT, rel);
   if(!file.startsWith(STATIC_ROOT)) return send(res, 403, { ok:false, error:'Forbidden' });
   fs.readFile(file, (err, buf) => {
@@ -36,10 +37,9 @@ function serveStatic(res, pathname){
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const p = url.pathname;
-  const method = req.method;
 
   // Static files (serve the site from the same server in dev)
-  if(method === 'GET' && !p.startsWith('/api')){
+  if(req.method === 'GET' && !p.startsWith('/api')){
     return serveStatic(res, p);
   }
   // Everything under /api goes to the shared handler

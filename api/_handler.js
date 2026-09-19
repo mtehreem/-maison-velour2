@@ -1,8 +1,8 @@
-// Maison Velour — shared API request handler
-// Used by both the local dev server (server.js) and the Vercel serverless
-// function (api/[[...slug]].js) so the API logic lives in exactly one place.
-const crypto = require('crypto');
-const { supabase } = require('./supabase');
+// Maison Velour — the API. Single source of truth, used by both the local dev
+// server (server.js) and the Vercel function (api/[[...slug]].js).
+const { supabase } = require('./_supabase');
+const { hashPassword, verifyPassword, makeToken } = require('./_crypto');
+const safepay = require('./_safepay');
 
 function send(res, code, data){
   const body = JSON.stringify(data);
@@ -10,7 +10,7 @@ function send(res, code, data){
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session'
   });
   res.end(body);
 }
@@ -23,7 +23,18 @@ async function readBody(req){
   });
 }
 
-function makeToken(){ return crypto.randomBytes(24).toString('hex'); }
+// The exact bytes of the request, unparsed. Safepay signs the raw payload, so
+// signature verification cannot use readBody() — JSON.parse then re-stringify
+// produces different bytes and the HMAC will never match.
+async function readRawBody(req){
+  return new Promise((resolve) => {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', c => { data += c; if(data.length > 2e6) req.destroy(); });
+    req.on('end', () => resolve(data));
+    req.on('error', () => resolve(''));
+  });
+}
 
 /* ---- Brute-force protection: per-IP + per-email login throttling ---- */
 // Note: on serverless (Vercel) this is best-effort — each invocation may hit a
@@ -52,36 +63,20 @@ function loginFail(key){
 }
 function loginSuccess(key){ loginAttempts.delete(key); }
 
-/* ---- Password hashing (scrypt, salted — never store plaintext) ---- */
-const SCRYPT_KEYLEN = 32;
-const SCRYPT_COST = 16384;   // N
-const SCRYPT_BLOCK = 8;      // r
-const SCRYPT_PAR = 1;        // p
-
-function hashPassword(pass){
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(pass, salt, SCRYPT_KEYLEN, { N: SCRYPT_COST, r: SCRYPT_BLOCK, p: SCRYPT_PAR });
-  return `scrypt$${salt}$${hash.toString('hex')}`;
-}
-
-function verifyPassword(pass, stored){
-  try {
-    const parts = String(stored||'').split('$');
-    if(parts.length !== 3 || parts[0] !== 'scrypt') return false;
-    const [, salt, hashHex] = parts;
-    const hash = crypto.scryptSync(pass, salt, SCRYPT_KEYLEN, { N: SCRYPT_COST, r: SCRYPT_BLOCK, p: SCRYPT_PAR });
-    const a = Buffer.from(hashHex, 'hex');
-    const b = hash;
-    if(a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch(e){ return false; }
-}
-
 /* ---- Supabase data helpers ---- */
 
 // Convert Supabase products rows to the shape the site expects
 function mapProduct(p){
   return { id:p.id, name:p.name, cat:p.cat, price:p.price, was:p.was||0, image:p.image||'', 'art[0]':p.art1||'#fff', 'art[1]':p.art2||'#000', g:p.glyph||'✦', badge:p.badge||'' };
+}
+
+function mapOrder(r){
+  return {
+    num:r.num, email:r.email, total:r.total, items:r.items, date:r.created_at,
+    name:r.ship_name, phone:r.ship_phone, address:r.ship_address,
+    city:r.ship_city, country:r.ship_country, zip:r.ship_zip,
+    status:r.status, payment_method:r.payment_method, payment_status:r.payment_status
+  };
 }
 
 async function userFromReq(req){
@@ -112,12 +107,58 @@ async function listWishlist(sessionKey, userId){
   return (data || []).map(r => r.product_id);
 }
 
+// One place that writes an order, so the cash-on-delivery path and the card
+// path can never drift apart. Returns the row the caller needs to respond with.
+async function insertOrder({ body, user, sessionKey, paymentMethod, paymentStatus }){
+  const b = body || {};
+  const email = (user ? user.email : String(b.email || 'guest')).toLowerCase();
+  const num = 'MV-' + Date.now().toString(36).toUpperCase().slice(-6);
+  const items = Array.isArray(b.items) ? b.items : [];
+  const total = Number(b.total) || 0;
+
+  const { data: ins, error } = await supabase.from('orders').insert({
+    num, user_id: user ? user.id : null, email, total, items: items.length,
+    ship_name: String(b.name||''), ship_phone: String(b.phone||''), ship_address: String(b.address||''),
+    ship_city: String(b.city||''), ship_country: String(b.country||''), ship_zip: String(b.zip||''),
+    payment_method: String(paymentMethod || ''), payment_status: String(paymentStatus || 'unpaid')
+  }).select('id').single();
+  if(error) throw error;
+
+  for(const it of items){
+    await supabase.from('order_items').insert({
+      order_id: ins.id, product_id: Number(it.product_id),
+      name: String(it.name||''), price: Number(it.price||0), qty: Number(it.qty||1)
+    });
+  }
+  await supabase.from('cart_items').delete().eq('session_token', sessionKey);
+
+  return { id: ins.id, num, email, total, itemCount: items.length };
+}
+
+// A Safepay webhook or return-URL check both need to settle an order the same
+// way. Marking twice must be a no-op: Safepay retries deliveries, and a shopper
+// who revisits the return URL would otherwise re-trigger it.
+async function markOrderPaid(order){
+  if(!order) return null;
+  if(String(order.payment_status) === 'paid') return order;
+  const { data } = await supabase
+    .from('orders')
+    .update({ payment_status: 'paid' })
+    .eq('id', order.id)
+    .select('*')
+    .single();
+  return data || order;
+}
+
 async function handleApi(req, res){
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
   const method = req.method;
 
-  if(method === 'OPTIONS'){ res.writeHead(204, {'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,PUT,DELETE,OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization'}); return res.end(); }
+  if(method === 'OPTIONS'){
+    res.writeHead(204, {'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,PUT,DELETE,OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization, X-Session'});
+    return res.end();
+  }
 
   try {
     /* ---- Wishlist merge on login: attach session wishlist to user ---- */
@@ -171,7 +212,6 @@ async function handleApi(req, res){
       if(!ok){ loginFail(tKey); return send(res, 401, { ok:false, error:'Incorrect email or password' }); }
       loginSuccess(tKey);
       if(!isScrypt){
-        // upgrade legacy plaintext password to a hash on first successful login
         await supabase.from('users').update({ pass: hashPassword(pass) }).eq('id', u.id);
       }
       const token = makeToken();
@@ -223,38 +263,40 @@ async function handleApi(req, res){
     if(p === '/api/orders' && method === 'POST'){
       const b = await readBody(req);
       const u = await userFromReq(req);
-      const email = (u ? u.email : String(b.email||'guest')).toLowerCase();
-      const num = 'MV-' + Date.now().toString(36).toUpperCase().slice(-6);
-      const items = Array.isArray(b.items) ? b.items : [];
-      const total = Number(b.total) || 0;
-      const { data: ins, error } = await supabase.from('orders').insert({
-        num, user_id: u ? u.id : null, email, total, items: items.length,
-        ship_name: String(b.name||''), ship_phone: String(b.phone||''), ship_address: String(b.address||''), ship_city: String(b.city||''), ship_country: String(b.country||'')
-      }).select('id').single();
-      if(error) throw error;
-      for(const it of items){
-        await supabase.from('order_items').insert({ order_id: ins.id, product_id: Number(it.product_id), name: String(it.name||''), price: Number(it.price||0), qty: Number(it.qty||1) });
-      }
-      await supabase.from('cart_items').delete().eq('session_token', sessionKey);
-      return send(res, 200, { ok:true, order:{ num, date: new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}), total, items: items.length, email, name: String(b.name||''), phone: String(b.phone||''), address: String(b.address||''), city: String(b.city||''), country: String(b.country||'') } });
+      const order = await insertOrder({
+        body: b, user: u, sessionKey,
+        paymentMethod: b.payment_method, paymentStatus: 'unpaid'
+      });
+      return send(res, 200, { ok:true, order:{
+        num: order.num, date: new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}),
+        total: order.total, items: order.itemCount, email: order.email, name: String(b.name||''), phone: String(b.phone||''),
+        address: String(b.address||''), city: String(b.city||''), country: String(b.country||''),
+        zip: String(b.zip||''), status:'In transit 🚚', payment_method: String(b.payment_method||''), payment_status:'unpaid'
+      } });
     }
     if(p === '/api/orders' && method === 'GET'){
       const u = await userFromReq(req);
       const email = (req.headers['x-email'] || (u ? u.email : '')).toLowerCase();
-      let q = supabase.from('orders').select('num, email, total, items, ship_name, ship_phone, ship_address, ship_city, ship_country, created_at').order('id', { ascending:false });
+      let q = supabase.from('orders').select('*').order('id', { ascending:false });
       if(email) q = q.eq('email', email);
       const { data: rows, error } = await q.limit(20);
       if(error) throw error;
-      return send(res, 200, { ok:true, orders: (rows||[]).map(r => ({ num:r.num, email:r.email, total:r.total, items:r.items, date:r.created_at, name:r.ship_name, phone:r.ship_phone, address:r.ship_address, city:r.ship_city, country:r.ship_country })) });
+      return send(res, 200, { ok:true, orders: (rows||[]).map(mapOrder) });
     }
     if(p === '/api/orders/track' && method === 'POST'){
       const b = await readBody(req);
-      const num = String(b.num||'').toUpperCase();
+      const num = String(b.num||'').toUpperCase().trim();
       const zip = String(b.zip||'').trim();
       if(!num || !zip) return send(res, 400, { ok:false, error:'num and zip required' });
-      const { data: o } = await supabase.from('orders').select('num, email, total, items, ship_name, ship_phone, ship_address, ship_city, ship_country, created_at').eq('num', num).maybeSingle();
+      const { data: o } = await supabase.from('orders').select('*').eq('num', num).maybeSingle();
       if(!o) return send(res, 404, { ok:false, error:'Order not found' });
-      return send(res, 200, { ok:true, order:{ num:o.num, total:o.total, items:o.items, date:o.created_at, status:'In transit 🚚', name:o.ship_name, phone:o.ship_phone, address:o.ship_address, city:o.ship_city, country:o.ship_country } });
+      // The postal code must match the one given at checkout. Orders placed
+      // before the column existed have none stored, so those still match.
+      const storedZip = String(o.ship_zip || '').trim();
+      if(storedZip && storedZip.toLowerCase() !== zip.toLowerCase()){
+        return send(res, 404, { ok:false, error:'Order not found' });
+      }
+      return send(res, 200, { ok:true, order: mapOrder({ ...o, status: o.status || 'In transit 🚚' }) });
     }
 
     /* ---- Wishlist ---- */
@@ -285,6 +327,120 @@ async function handleApi(req, res){
       if(pid) q = q.eq('product_id', pid);
       await q;
       return send(res, 200, { ok:true, wishlist: await listWishlist(sessionKey, wishUserId) });
+    }
+
+    /* ---- Card payments (Safepay) ---- */
+    // The order is written first, then a Safepay hosted-checkout session is
+    // created for it. Nothing the browser says can mark an order paid — only a
+    // signature-verified webhook or the server-side return-URL check can.
+    if(p === '/api/checkout' && method === 'POST'){
+      if(!safepay.isConfigured()) return send(res, 503, { ok:false, error:'Card payments are not set up yet' });
+      const b = await readBody(req);
+      const currency = String(b.currency || '').toUpperCase();
+      const amount = Number(b.amount);
+      const items = Array.isArray(b.items) ? b.items : [];
+      if(!items.length) return send(res, 400, { ok:false, error:'Your cart is empty' });
+      if(!(amount > 0)) return send(res, 400, { ok:false, error:'amount required' });
+      if(!safepay.SUPPORTED_CURRENCIES.includes(currency)){
+        return send(res, 400, { ok:false, error:`Card payment is not available in ${currency || 'that currency'}. Please switch currency or choose cash on delivery.` });
+      }
+
+      const u = await userFromReq(req);
+      const order = await insertOrder({ body: b, user: u, sessionKey, paymentMethod: 'card', paymentStatus: 'unpaid' });
+      const origin = String(req.headers.origin || `http://${req.headers.host || 'localhost:4321'}`).replace(/\/+$/, '');
+
+      try {
+        const sp = safepay.client();
+        const session = await sp.payments.session.setup({
+          merchant_api_key: safepay.publicApiKey(),
+          intent: 'CYBERSOURCE',
+          mode: 'payment',
+          entry_mode: 'raw',
+          currency,
+          // Amount is in the lowest denomination for every currency, PKR too.
+          amount: safepay.toMinorUnits(amount),
+          // Safepay whitelists metadata keys; order_id is echoed back on webhooks.
+          metadata: { order_id: order.num }
+        });
+        const tracker = session.data.tracker.token;
+        const passport = await sp.client.passport.create();
+        const checkoutUrl = sp.checkout.createCheckoutUrl({
+          env: safepay.CHECKOUT_ENV,
+          tbt: passport.data,
+          source: 'hosted',
+          tracker,
+          redirect_url: `${origin}/`,
+          cancel_url: `${origin}/?safepay=cancel`
+        });
+        // Recorded before the shopper is redirected, so an arriving webhook can
+        // always find the order.
+        await supabase.from('orders').update({ payment_ref: tracker }).eq('id', order.id);
+        return send(res, 200, { ok:true, url: checkoutUrl, num: order.num, tracker });
+      } catch(err){
+        console.error('Safepay checkout failed:', (err && err.message) || err);
+        // No payment can be taken, so the order must not linger as if it were real.
+        await supabase.from('orders').delete().eq('id', order.id);
+        return send(res, 502, { ok:false, error:'Could not start the payment. Please try again.' });
+      }
+    }
+
+    // Called when Safepay sends the shopper back. Lets the confirmation screen
+    // be accurate without waiting for the webhook, which cannot reach localhost.
+    if(p === '/api/checkout/status' && method === 'GET'){
+      const tracker = String(url.searchParams.get('tracker') || '').trim();
+      if(!tracker) return send(res, 400, { ok:false, error:'tracker required' });
+      const { data: o } = await supabase.from('orders').select('*').eq('payment_ref', tracker).maybeSingle();
+      if(!o) return send(res, 404, { ok:false, error:'Order not found' });
+      if(String(o.payment_status) === 'paid') return send(res, 200, { ok:true, paid:true, state:'TRACKER_ENDED', order: mapOrder(o) });
+
+      let state = '';
+      let settled = false;
+      if(safepay.isConfigured()){
+        try {
+          const r = await safepay.client().reporter.payments.fetch(tracker);
+          const t = safepay.trackerFrom(r);
+          state = String((t && t.state) || '');
+          settled = state === 'TRACKER_ENDED' || t.is_success === true;
+        } catch(e){ /* not confirmed yet, or Safepay unreachable */ }
+      }
+      if(settled){
+        return send(res, 200, { ok:true, paid:true, state, order: mapOrder(await markOrderPaid(o)) });
+      }
+      return send(res, 200, { ok:true, paid:false, state, order: mapOrder(o) });
+    }
+
+    // Safepay webhook. Reachable by anyone, so the HMAC signature is the only
+    // thing between it and a forged "paid" order.
+    if(p === '/api/safepay/webhook' && method === 'POST'){
+      const raw = await readRawBody(req);
+      if(!safepay.verifyWebhookSignature(raw, req.headers['x-sfpy-signature'])){
+        return send(res, 400, { ok:false, error:'Invalid signature' });
+      }
+      let event;
+      try { event = JSON.parse(raw || '{}'); } catch(e){ return send(res, 400, { ok:false, error:'Invalid payload' }); }
+
+      const type = String(event.type || '');
+      const data = event.data || {};
+      const tracker = safepay.trackerFromEvent(data);
+      const orderNum = safepay.metadataValue(data.metadata, 'order_id');
+
+      // Settled before acknowledging. Safepay retries anything it does not get a
+      // 2xx for within 10 seconds, and a serverless instance can be frozen the
+      // moment the response is sent — so the write must happen first, and a
+      // failure must NOT be acknowledged.
+      if(type === 'payment.succeeded'){
+        const q = supabase.from('orders').select('*');
+        const { data: row } = orderNum
+          ? await q.eq('num', orderNum).maybeSingle()
+          : await q.eq('payment_ref', tracker).maybeSingle();
+        await markOrderPaid(row);
+      } else if(type === 'payment.failed' && tracker){
+        await supabase.from('orders')
+          .update({ payment_status: 'failed' })
+          .eq('payment_ref', tracker)
+          .eq('payment_status', 'unpaid');
+      }
+      return send(res, 200, { ok:true });
     }
 
     /* ---- Admin (is_admin required) ---- */
@@ -336,7 +492,12 @@ async function handleApi(req, res){
     if(p === '/api/admin/orders' && method === 'PUT'){
       if(requireAdmin()) return send(res, 403, { ok:false, error:'Admin only' });
       const b = await readBody(req);
-      await supabase.from('orders').update({ status: String(b.status||'') }).eq('num', String(b.num||''));
+      const updates = {};
+      if(b.status !== undefined) updates.status = String(b.status);
+      if(b.payment_status !== undefined) updates.payment_status = String(b.payment_status);
+      if(Object.keys(updates).length){
+        await supabase.from('orders').update(updates).eq('num', String(b.num||''));
+      }
       return send(res, 200, { ok:true });
     }
     if(p === '/api/admin/orders' && method === 'DELETE'){
@@ -349,12 +510,20 @@ async function handleApi(req, res){
     // Wishlist + users listing
     if(p === '/api/admin/wishlist' && method === 'GET'){
       if(requireAdmin()) return send(res, 403, { ok:false, error:'Admin only' });
-      const { data: wrows } = await supabase.from('wishlist').select('id, session_token, product_id').order('id', { ascending:false });
+      const { data: wrows } = await supabase.from('wishlist').select('id, session_token, user_id, product_id').order('id', { ascending:false });
       const { data: prods } = await supabase.from('products').select('id, name, price');
       const pmap = {};
       (prods||[]).forEach(p2 => pmap[p2.id] = p2);
-      const rows = (wrows||[]).map(w => ({ id:w.id, session_token:w.session_token, product_id:w.product_id, product_name: pmap[w.product_id] ? pmap[w.product_id].name : '', price: pmap[w.product_id] ? pmap[w.product_id].price : 0 }));
+      const rows = (wrows||[]).map(w => ({ id:w.id, session_token:w.session_token, user_id:w.user_id, product_id:w.product_id, product_name: pmap[w.product_id] ? pmap[w.product_id].name : '', price: pmap[w.product_id] ? pmap[w.product_id].price : 0 }));
       return send(res, 200, { ok:true, wishlist: rows });
+    }
+    if(p === '/api/admin/wishlist' && method === 'DELETE'){
+      if(requireAdmin()) return send(res, 403, { ok:false, error:'Admin only' });
+      const b = await readBody(req);
+      const id = Number(b.id);
+      if(!id) return send(res, 400, { ok:false, error:'id required' });
+      await supabase.from('wishlist').delete().eq('id', id);
+      return send(res, 200, { ok:true });
     }
     if(p === '/api/admin/users' && method === 'GET'){
       if(requireAdmin()) return send(res, 403, { ok:false, error:'Admin only' });
@@ -384,8 +553,8 @@ async function handleApi(req, res){
 
     return send(res, 404, { ok:false, error:'Not found' });
   } catch(err){
-    return send(res, 500, { ok:false, error: String(err && err.message || err) });
+    return send(res, 500, { ok:false, error: String((err && err.message) || err) });
   }
 }
 
-module.exports = { handleApi, send, readBody, userFromReq, listCart, listWishlist, hashPassword, verifyPassword };
+module.exports = { handleApi, send, readBody, readRawBody, userFromReq, listCart, listWishlist, insertOrder, markOrderPaid };

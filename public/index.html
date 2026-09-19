@@ -999,6 +999,16 @@
   .pay-opt.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold);background:var(--gold-soft)}
   .pay-opt b{font-weight:500;color:var(--noir);font-size:.92rem}
   .pay-opt span{font-size:.78rem;color:var(--ink-soft)}
+  /* Card is paid on Safepay's hosted page — this sits with the pay-opt cards and
+     borrows their gold treatment so it reads as part of the same group. */
+  .pay-note{
+    display:flex;align-items:flex-start;gap:12px;
+    border:1px solid rgba(197,160,89,.45);border-radius:12px;
+    padding:13px 16px;background:var(--gold-soft);
+  }
+  .pay-note .pn-icon{line-height:1.2}
+  .pay-note b{display:block;font-weight:500;color:var(--noir);font-size:.92rem}
+  .pay-note .pn-sub{font-size:.78rem;color:var(--ink-soft);margin-top:3px}
   .order-col{background:var(--white);border-radius:18px;padding:22px;box-shadow:var(--shadow-sm);align-self:start}
   .order-col h4{font-family:var(--serif);color:var(--noir);font-size:1.1rem;margin-bottom:16px}
   .o-item{display:flex;gap:10px;font-size:.84rem;color:var(--ink);margin-bottom:10px}
@@ -1603,16 +1613,17 @@
               <div class="field"><label>Country</label><select id="bCountry"></select><span class="err">Select a country</span></div>
               <div class="field full"><label>Payment Method</label>
                 <div class="pay-options">
-                  <label class="pay-opt"><input type="radio" name="pay" value="card" checked><span><b>Credit / Debit Card</b><br><span>Visa • Mastercard • Amex — encrypted &amp; secure</span></span></label>
-                  <label class="pay-opt"><input type="radio" name="pay" value="paypal"><span><b>PayPal</b><br><span>Pay with your PayPal balance</span></span></label>
+                  <label class="pay-opt"><input type="radio" name="pay" value="card" checked><span><b>Credit / Debit Card</b><br><span>Visa • Mastercard • PayPak — secured by Safepay</span></span></label>
                   <label class="pay-opt"><input type="radio" name="pay" value="cod"><span><b>Cash on Delivery</b><br><span>Pay when your order arrives</span></span></label>
                 </div>
               </div>
               <div class="field full" id="cardFields">
-                <div class="form-grid">
-                  <div class="field full"><label>Card Number</label><input type="text" id="bCard" placeholder="1234 5678 9012 3456" inputmode="numeric"><span class="err">Enter a valid 16-digit card number</span></div>
-                  <div class="field"><label>Expiry (MM/YY)</label><input type="text" id="bExp" placeholder="08/28"><span class="err">Use MM/YY format</span></div>
-                  <div class="field"><label>CVV</label><input type="text" id="bCvv" placeholder="123" inputmode="numeric"><span class="err">3–4 digits</span></div>
+                <div class="pay-note">
+                  <span class="pn-icon" aria-hidden="true">🔒</span>
+                  <div>
+                    <b>You'll be taken to Safepay to pay</b>
+                    <div class="pn-sub">Card details are entered on Safepay's secure page and never touch this site.</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1808,6 +1819,19 @@ function fmt(usd){
   } catch(e){
     return c.symbol + val.toFixed(2);
   }
+}
+
+// Safepay cannot charge every currency this site displays — INR, AUD and JPY
+// come back "unsupported or invalid currency". Those stay display-only, and
+// checkout offers card payment only where it can actually be taken.
+const PAYABLE_CURRENCIES = ['PKR','USD','EUR','GBP','AED','SAR','CAD'];
+
+// The amount to charge, in the currently selected currency, as a plain number.
+// Rounded to the same precision fmt() shows, so the shopper is charged exactly
+// the figure on screen rather than a hidden fraction of it.
+function payableAmount(usd){
+  const val = usd * CURRENCIES[currentCurrency].rate;
+  return val >= 100 ? Math.round(val) : Math.round(val * 100) / 100;
 }
 
 /* HTML-escape user-supplied values before interpolating into innerHTML (prevents XSS) */
@@ -2118,14 +2142,14 @@ function renderShop(){
   }
   shopGrid.innerHTML = list.map(p => `
     <article class="card" data-id="${p.id}">
-      <div class="card-art" style="--c1:${p.art[0]};--c2:${p.art[1]}">
-        ${p.badge ? `<span class="badge-flag">${p.badge}</span>` : ''}
+      <div class="card-art" style="--c1:${esc(p.art[0])};--c2:${esc(p.art[1])}">
+        ${p.badge ? `<span class="badge-flag">${esc(p.badge)}</span>` : ''}
         <button class="wish ${WISHLIST.has(p.id) ? 'active' : ''}" data-wish="${p.id}" aria-label="Add to wishlist">${WISHLIST.has(p.id) ? '♥' : '♡'}</button>
-        ${p.image ? `<img class="pimg" src="${p.image}" alt="${p.name}" loading="lazy">` : `<span class="glyph">${p.g}</span>`}
+        ${p.image ? `<img class="pimg" src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy">` : `<span class="glyph">${esc(p.g)}</span>`}
       </div>
       <div class="card-body">
-        <span class="card-cat">${p.cat}</span>
-        <h3>${p.name}</h3>
+        <span class="card-cat">${esc(p.cat)}</span>
+        <h3>${esc(p.name)}</h3>
         <p>${p.was ? 'Limited-edition formula, reduced for the season.' : 'Maison Velour signature formula.'}</p>
         <div class="card-foot">
           <div class="price">${fmt(p.price)}${p.was ? `<small>${fmt(p.was)}</small>` : ''}</div>
@@ -2190,8 +2214,33 @@ let cart = JSON.parse(localStorage.getItem('mv_cart') || '[]');
 const FREE_SHIP_USD = 300;
 const SHIP_USD = 9;
 const TAX_PCT = 0.05;
+const LOYALTY_MIN_USD = 200;    // spend over this earns the loyalty discount
+const LOYALTY_PCT = 0.05;
 
-function cartCount(){ return cart.reduce((s, i) => s + i.qty, 0); }
+// A piece can live in the shop catalogue (loaded from the database) or only in a
+// Discover category — look in both so nothing ever goes missing from the bag.
+function findProduct(id){
+  return PRODUCTS.find(p => p.id === id)
+      || DISCOVER.flatMap(c => c.items).find(i => i.id === id)
+      || null;
+}
+// The two shapes name their colours differently; normalise them.
+function productArt(p){
+  return p.art ? p.art : [p.c1 || '#fff', p.c2 || '#000'];
+}
+// One place for the money maths, so the cart drawer, the checkout summary and
+// the order we actually save can never disagree.
+function computeTotals(sub){
+  const ship = sub >= FREE_SHIP_USD ? 0 : SHIP_USD;
+  const tax = sub * TAX_PCT;
+  const discount = sub > LOYALTY_MIN_USD ? sub * LOYALTY_PCT : 0;
+  return { sub, ship, tax, discount, total: sub + ship + tax - discount };
+}
+// Only count items that resolve to a real product, so the badge always matches
+// what the drawer can actually show.
+function resolvedCart(){ return cart.filter(i => findProduct(i.id)); }
+
+function cartCount(){ return resolvedCart().reduce((s, i) => s + i.qty, 0); }
 
 function addToCart(id, btn){
   const item = cart.find(i => i.id === id);
@@ -2202,7 +2251,7 @@ function addToCart(id, btn){
     btn.textContent = 'Added ✓'; btn.classList.add('added');
     setTimeout(() => { btn.textContent = old; btn.classList.remove('added'); }, 1200);
   }
-  toast('Added to your bag ✦');
+  toast('Added to your bag');
   renderCart();
   const badge = document.getElementById('cartCount');
   badge.classList.remove('bump'); void badge.offsetWidth; badge.classList.add('bump');
@@ -2255,8 +2304,8 @@ async function loadCartFromDB(){
 }
 
 function subtotalUsd(){
-  return cart.reduce((s, i) => {
-    const p = PRODUCTS.find(p => p.id === i.id);
+  return resolvedCart().reduce((s, i) => {
+    const p = findProduct(i.id);
     return s + ((p ? p.price : 0) * i.qty);
   }, 0);
 }
@@ -2265,8 +2314,9 @@ function renderCart(){
   document.getElementById('cartCount').textContent = cartCount();
   const body = document.getElementById('cartBody');
   const foot = document.getElementById('cartFoot');
+  const items = resolvedCart();
 
-  if(!cart.length){
+  if(!items.length){
     body.innerHTML = `<div class="cart-empty"><div class="big">🛍</div><p>Your shopping cart is empty.</p><p style="font-size:.82rem;margin-top:4px">Discover the edit and find your signature.</p></div>`;
     foot.innerHTML = `<button class="checkout-btn" onclick="document.getElementById('closeCart').click()">Explore the Collection</button>`;
     return;
@@ -2281,14 +2331,14 @@ function renderCart(){
       <div class="fs-label"><span>${freeLeft > 0 ? `You're ${fmt(freeLeft)} from complimentary shipping` : '🎉 Complimentary shipping unlocked'}</span><span>${fmt(sub)}</span></div>
       <div class="fs-bar"><i style="width:${pct}%"></i></div>
     </div>
-    ${cart.map(i => {
-      const p = PRODUCTS.find(x => x.id === i.id);
-      if(!p) return '';
+    ${items.map(i => {
+      const p = findProduct(i.id);
+      const art = productArt(p);
       return `<div class="cart-item" data-cart-id="${p.id}">
-        <div class="cart-thumb" style="--c1:${p.art[0]};--c2:${p.art[1]}">${p.image ? `<img class="pimg" src="${p.image}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;border-radius:12px">` : p.g}</div>
+        <div class="cart-thumb" style="--c1:${art[0]};--c2:${art[1]}">${p.image ? `<img class="pimg" src="${p.image}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:12px">` : (p.g || '✦')}</div>
         <div>
-          <span class="ci-cat">${p.cat}</span>
-          <h4>${p.name}</h4>
+          <span class="ci-cat">${esc(p.cat || 'Maison Velour')}</span>
+          <h4>${esc(p.name)}</h4>
           <div class="ci-price">${fmt(p.price)}</div>
         </div>
         <div class="ci-right">
@@ -2302,10 +2352,7 @@ function renderCart(){
       </div>`;
     }).join('')}`;
 
-  const ship = sub >= FREE_SHIP_USD ? 0 : SHIP_USD;
-  const tax = sub * TAX_PCT;
-  const discount = sub > 200 ? sub * 0.05 : 0;
-  const total = sub + ship + tax - discount;
+  const { ship, tax, discount, total } = computeTotals(sub);
   foot.innerHTML = `
     <div class="drow"><span>Subtotal</span><span>${fmt(sub)}</span></div>
     ${discount > 0 ? `<div class="drow discount"><span>Loyalty discount</span><span>-${fmt(discount)}</span></div>` : ''}
@@ -2366,6 +2413,7 @@ function openCheckout(){
   }
   document.getElementById('overlay').classList.remove('show');
   document.getElementById('cartDrawer').classList.remove('show');
+  syncPaymentOptions();
   renderOrderSummary();
   checkoutModal.classList.add('show');
   lockScroll();
@@ -2376,16 +2424,12 @@ function closeCheckout(){
 }
 function renderOrderSummary(){
   const sub = subtotalUsd();
-  const ship = sub >= FREE_SHIP_USD ? 0 : SHIP_USD;
-  const tax = sub * TAX_PCT;
-  // Loyalty: 5% off orders over $200
-  const discount = sub > 200 ? sub * 0.05 : 0;
-  const total = sub + ship + tax - discount;
-  document.getElementById('orderItems').innerHTML = cart.map(i => {
-    const p = PRODUCTS.find(x => x.id === i.id);
-    if(!p) return '';
-    return `<div class="o-item"><div class="cart-thumb" style="width:38px;height:38px;font-size:1.1rem;--c1:${p.art[0]};--c2:${p.art[1]}">${p.image ? `<img class="pimg" src="${p.image}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;border-radius:8px">` : p.g}</div>
-      <div class="nm"><b>${p.name}</b><span>Qty ${i.qty} × ${fmt(p.price)}</span></div>
+  const { ship, tax, discount, total } = computeTotals(sub);
+  document.getElementById('orderItems').innerHTML = resolvedCart().map(i => {
+    const p = findProduct(i.id);
+    const art = productArt(p);
+    return `<div class="o-item"><div class="cart-thumb" style="width:38px;height:38px;font-size:1.1rem;--c1:${art[0]};--c2:${art[1]}">${p.image ? `<img class="pimg" src="${p.image}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:8px">` : (p.g || '✦')}</div>
+      <div class="nm"><b>${esc(p.name)}</b><span>Qty ${i.qty} × ${fmt(p.price)}</span></div>
       <div>${fmt(p.price * i.qty)}</div></div>`;
   }).join('') || '<p style="font-size:.85rem;color:var(--ink-soft)">Your shopping cart is empty.</p>';
   document.getElementById('oCount').textContent = cartCount();
@@ -2413,6 +2457,27 @@ document.querySelectorAll('input[name="pay"]').forEach(r => {
 });
 document.querySelector('input[name="pay"][value="card"]').closest('.pay-opt').classList.add('sel');
 
+/* Card payment is only offered in currencies Safepay can actually charge, so the
+   option is hidden rather than failing at the final step. */
+function syncPaymentOptions(){
+  const cardRadio = document.querySelector('input[name="pay"][value="card"]');
+  if(!cardRadio) return;
+  const payable = PAYABLE_CURRENCIES.indexOf(currentCurrency) !== -1;
+  const wrap = cardRadio.closest('.pay-opt');
+  if(wrap) wrap.style.display = payable ? '' : 'none';
+  if(!payable && cardRadio.checked){
+    const cod = document.querySelector('input[name="pay"][value="cod"]');
+    if(cod){
+      cod.checked = true;
+      document.querySelectorAll('.pay-opt').forEach(o => o.classList.remove('sel'));
+      cod.closest('.pay-opt').classList.add('sel');
+    }
+  }
+  const cardFields = document.getElementById('cardFields');
+  if(cardFields) cardFields.style.display = (payable && cardRadio.checked) ? '' : 'none';
+}
+syncPaymentOptions();
+
 /* Validation helpers */
 const validators = {
   bName:    v => v.trim().length >= 3,
@@ -2421,10 +2486,7 @@ const validators = {
   bAddress: v => v.trim().length >= 5,
   bCity:    v => v.trim().length >= 2,
   bZip:     v => true,   // optional — always valid
-  bCountry: v => v.trim() !== '',
-  bCard:    v => v.replace(/\D/g, '').length === 16,
-  bExp:     v => /^(0[1-9]|1[0-2])\/\d{2}$/.test(v.trim()),
-  bCvv:     v => /^\d{3,4}$/.test(v.trim())
+  bCountry: v => v.trim() !== ''
 };
 
 function validateField(id){
@@ -2435,29 +2497,18 @@ function validateField(id){
   return ok;
 }
 
-['bName','bEmail','bPhone','bAddress','bCity','bZip','bCountry','bCard','bExp','bCvv'].forEach(id => {
+['bName','bEmail','bPhone','bAddress','bCity','bZip','bCountry'].forEach(id => {
   const input = document.getElementById(id);
   if(input) input.addEventListener('blur', () => validateField(id));
 });
 
-/* Card number pretty-format */
-document.getElementById('bCard').addEventListener('input', e => {
-  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
-});
-document.getElementById('bExp').addEventListener('input', e => {
-  let v = e.target.value.replace(/\D/g, '').slice(0, 4);
-  if(v.length > 2) v = v.slice(0,2) + '/' + v.slice(2);
-  e.target.value = v;
-});
-document.getElementById('bCvv').addEventListener('input', e => {
-  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
-});
-
 /* Place order */
+let placingOrder = false;
 document.getElementById('placeOrder').addEventListener('click', async () => {
+  if(placingOrder) return;                      // ignore double-clicks
+
   const ids = ['bName','bEmail','bPhone','bAddress','bCity','bCountry'];
   const pay = document.querySelector('input[name="pay"]:checked').value;
-  if(pay === 'card') ids.push('bCard','bExp','bCvv');
   let allOk = true;
   ids.forEach(id => { if(!validateField(id)) allOk = false; });
   if(!allOk){
@@ -2466,14 +2517,9 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
     if(firstBad) firstBad.focus();
     return;
   }
-  const orderNum = 'MV-' + Date.now().toString(36).toUpperCase().slice(-6);
-  document.getElementById('orderNum').textContent = 'Order ' + orderNum;
 
   const sub = subtotalUsd();
-  const ship = sub >= FREE_SHIP_USD ? 0 : SHIP_USD;
-  const tax = sub * TAX_PCT;
-  const discount = sub > 200 ? sub * 0.05 : 0;
-  const total = sub + ship + tax - discount;
+  const { ship, tax, discount, total } = computeTotals(sub);
 
   const billing = {
     name: document.getElementById('bName').value.trim(),
@@ -2481,18 +2527,96 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
     phone: document.getElementById('bPhone').value.trim(),
     address: document.getElementById('bAddress').value.trim(),
     city: document.getElementById('bCity').value.trim(),
-    country: document.getElementById('bCountry').value
+    country: document.getElementById('bCountry').value,
+    zip: document.getElementById('bZip').value.trim()
   };
 
-  // record the order in the local database (fire-and-forget; falls back to localStorage silently)
+  const items = resolvedCart().map(i => {
+    const p = findProduct(i.id);
+    return { product_id: p.id, name: p.name, price: p.price, qty: i.qty };
+  });
+
+  const btn = document.getElementById('placeOrder');
+  const btnLabel = btn.textContent;
+  placingOrder = true;
+  btn.disabled = true;
+  btn.textContent = 'Placing…';
+
+  const token = (SESSION && SESSION.token) || localStorage.getItem('mv_db_token') || '';
+  const authHeaders = token ? { Authorization: 'Bearer ' + token } : {};
+
+  // Card payments never touch this site: the order is written server-side and
+  // the shopper is handed to Safepay's hosted page, which collects the card.
+  if(pay === 'card'){
+    if(PAYABLE_CURRENCIES.indexOf(currentCurrency) === -1){
+      placingOrder = false; btn.disabled = false; btn.textContent = btnLabel;
+      notify({
+        type:'error',
+        title:'Card payment unavailable',
+        msg:'We cannot take card payments in ' + esc(currentCurrency) + ' yet. Please switch currency at the top of the page, or choose cash on delivery.',
+        duration: 9000
+      });
+      return;
+    }
+    const co = await DB.call('/checkout', {
+      method:'POST',
+      headers: authHeaders,
+      body:{
+        items, total: Math.round(total*100)/100,
+        currency: currentCurrency, amount: payableAmount(total),
+        email: billing.email, name: billing.name, phone: billing.phone,
+        address: billing.address, city: billing.city, country: billing.country,
+        zip: billing.zip
+      }
+    });
+    if(co && co.ok && co.url){
+      window.location.href = co.url;   // leaving the page — keep the button disabled
+      return;
+    }
+    placingOrder = false; btn.disabled = false; btn.textContent = btnLabel;
+    notify({
+      type:'error',
+      title:'Could not start the payment',
+      msg: co && co.error ? esc(co.error) : 'We could not reach the payment provider. Please try again, or choose cash on delivery.',
+      duration: 9000
+    });
+    return;
+  }
+
+  let dbRes = null;
   try {
-    const token = (SESSION && SESSION.token) || localStorage.getItem('mv_db_token') || '';
-    const items = cart.map(i => {
-      const p = PRODUCTS.find(x => x.id === i.id);
-      return p ? { product_id: p.id, name: p.name, price: p.price, qty: i.qty } : null;
-    }).filter(Boolean);
-    const dbRes = await DB.call('/orders', { method:'POST', headers: token ? { Authorization: 'Bearer ' + token } : {}, body:{ items, total: Math.round(total*100)/100, email: billing.email, name: billing.name, phone: billing.phone, address: billing.address, city: billing.city, country: billing.country } });
-  } catch(e){}
+    dbRes = await DB.call('/orders', {
+      method:'POST',
+      headers: authHeaders,
+      body:{
+        items, total: Math.round(total*100)/100,
+        email: billing.email, name: billing.name, phone: billing.phone,
+        address: billing.address, city: billing.city, country: billing.country,
+        zip: billing.zip, payment_method: pay
+      }
+    });
+  } catch(e){ dbRes = null; }
+
+  placingOrder = false;
+  btn.disabled = false;
+  btn.textContent = btnLabel;
+
+  // Never show a confirmation for an order that was not actually saved. The form
+  // stays filled in so nothing has to be typed again.
+  if(!dbRes || !dbRes.ok){
+    notify({
+      type:'error',
+      title:'Order could not be placed',
+      msg: dbRes === null
+        ? 'We could not reach the server. Please check your connection and try again — your details are still here.'
+        : 'Your order was not saved: ' + esc(dbRes.error || 'unknown error') + '. Please try again.',
+      duration: 9000
+    });
+    return;
+  }
+
+  const orderNum = (dbRes.order && dbRes.order.num) || ('MV-' + Date.now().toString(36).toUpperCase().slice(-6));
+  document.getElementById('orderNum').textContent = 'Order ' + orderNum;
 
   document.getElementById('checkoutView').style.display = 'none';
   document.getElementById('successView').style.display = 'block';
@@ -2520,7 +2644,7 @@ document.getElementById('continueShop').addEventListener('click', () => {
   document.getElementById('successView').style.display = 'none';
   document.getElementById('checkoutView').style.display = '';
   closeCheckout();
-  toast('Welcome back ✦');
+  toast('Welcome back');
 });
 
 /* ---------- Feedback rendering ---------- */
@@ -2890,7 +3014,7 @@ document.getElementById('lpTrackBtn').addEventListener('click', async () => {
   }
   // fallback: localStorage orders (offline)
   const orders = [];
-  try { orders = JSON.parse(localStorage.getItem('mv_orders') || '[]'); } catch(e){ orders = []; }
+  try { orders.push(...JSON.parse(localStorage.getItem('mv_orders') || '[]')); } catch(e){}
   const match = orders.find(o => o.num.toUpperCase() === id);
   if(match){
     result.innerHTML = `<b>Found it!</b> Order ${match.num} · ${match.items} items · placed ${match.date} · In transit 🚚`;
@@ -3035,10 +3159,10 @@ function renderWishlistUI(){
   }).filter(Boolean);
   body.innerHTML = items.map(({ pid, p, img, qty }) => `
     <div class="wish-item ${WISH_EDIT ? 'editing' : ''}">
-      <div class="wish-thumb" style="--c1:${p.art ? p.art[0] : p.c1};--c2:${p.art ? p.art[1] : p.c2}">${img ? `<img src="${img}" alt="${p.name}" loading="lazy">` : (p.g || '✦')}</div>
+      <div class="wish-thumb" style="--c1:${esc(p.art ? p.art[0] : p.c1)};--c2:${esc(p.art ? p.art[1] : p.c2)}">${img ? `<img src="${esc(img)}" alt="${esc(p.name)}" loading="lazy">` : esc(p.g || '✦')}</div>
       <div class="wish-item-info">
-        <span class="wi-cat">${p.cat || 'Maison Velour'}</span>
-        <h4>${p.name}</h4>
+        <span class="wi-cat">${esc(p.cat || 'Maison Velour')}</span>
+        <h4>${esc(p.name)}</h4>
         <span class="wi-price">${fmt(p.price)}</span>
         ${WISH_EDIT ? `
           <div class="wi-qty">
@@ -3174,7 +3298,7 @@ document.getElementById('newsForm').addEventListener('submit', e => {
     return;
   }
   email.value = '';
-  toast('Welcome to the Inner Circle ✦');
+  toast('Welcome to the Inner Circle');
 });
 
 /* ---------- Contact Us (FormSubmit → owner email) ---------- */
@@ -3353,6 +3477,49 @@ const DB = {
   }
 };
 
+/* ---------- Returning from Safepay ---------- */
+// Safepay sends the shopper back with ?tracker=... when they finish, or to the
+// cancel_url we handed it. The webhook is still what guarantees an order is
+// settled; this only makes the confirmation screen accurate without waiting,
+// which also covers local testing where a webhook cannot reach the machine.
+async function handleSafepayReturn(){
+  const params = new URLSearchParams(location.search);
+
+  if(params.get('safepay') === 'cancel'){
+    history.replaceState(null, '', location.pathname);
+    notify({ type:'info', title:'Payment cancelled', msg:'No payment was taken and your bag is still here.', duration: 9000 });
+    return;
+  }
+
+  const tracker = params.get('tracker');
+  if(!tracker) return;
+  // Drop the query string so refreshing does not re-check a settled payment.
+  history.replaceState(null, '', location.pathname);
+
+  const r = await DB.call('/checkout/status?tracker=' + encodeURIComponent(tracker));
+  const num = (r && r.order && r.order.num) || '';
+
+  if(r && r.ok && r.paid){
+    cart = []; persistCart(); renderCart();
+    document.getElementById('orderNum').textContent = 'Order ' + num;
+    document.getElementById('checkoutView').style.display = 'none';
+    document.getElementById('successView').style.display = 'block';
+    document.getElementById('overlay').classList.remove('show');
+    document.getElementById('cartDrawer').classList.remove('show');
+    checkoutModal.classList.add('show');
+    lockScroll();
+    notify({ type:'success', title:'Payment received', msg:'Order ' + esc(num) + ' is confirmed. A receipt is on its way.', duration: 9000 });
+    return;
+  }
+
+  notify({
+    type:'error',
+    title:'Payment not confirmed',
+    msg:'We could not confirm payment for order ' + esc(num || '(unknown)') + '. If your card was charged, contact us quoting that number and we will sort it out.',
+    duration: 14000
+  });
+}
+
 /* ---------- Boot ---------- */
 function renderAll(){
   renderShop();
@@ -3368,6 +3535,7 @@ renderScore();
 loadProductsFromDB();   // refresh catalog from the database (async, safe after boot)
 loadWishlist();         // load saved wishlist for the session/user
 loadCartFromDB();       // load saved cart from Supabase (merges with local items)
+handleSafepayReturn();  // settle the confirmation if we just came back from Safepay
 </script>
 </body>
 </html>

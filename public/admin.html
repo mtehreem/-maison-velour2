@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
-<style>
+<style> 
   :root{
     --ink:#1c1a17; --ink-soft:#6f675d; --noir:#0e0d0b; --noir-deep:#080706;
     --gold:#c5a059; --gold-bright:#e5c07b; --gold-deep:#9a7434; --gold-soft:#f7efe0;
@@ -210,7 +210,7 @@ function esc(v){
 async function initAuth(){
   if(token){
     const me = await api('/me');
-    if(me && me.ok && me.user.is_admin === 1){
+    if(me && me.ok && Number(me.user.is_admin) === 1){
       document.getElementById('adminName').textContent = me.user.name;
       document.getElementById('loginScreen').style.display = 'none';
       document.getElementById('mainApp').style.display = '';
@@ -224,7 +224,7 @@ document.getElementById('adminLoginBtn').addEventListener('click', async () => {
   const email = document.getElementById('adminEmail').value.trim();
   const pass = document.getElementById('adminPass').value;
   const r = await api('/login', { method:'POST', body:{ email, pass } });
-  if(r && r.ok && r.user.is_admin === 1){
+  if(r && r.ok && Number(r.user.is_admin) === 1){
     token = r.token;
     localStorage.setItem('mv_admin_token', token);
     document.getElementById('adminName').textContent = r.user.name;
@@ -337,20 +337,35 @@ async function loadOrders(){
     if(/transit|ship/i.test(s)) return '<span class="status-pill status-transit">' + es + '</span>';
     return '<span class="status-pill status-new">' + es + '</span>';
   };
+  // How the customer chose to pay, and whether it has settled.
+  const payLabels = { card: 'Card', cod: 'Cash on Delivery' };
+  const pay = o => {
+    const method = payLabels[o.payment_method] || o.payment_method || '—';
+    const paid = String(o.payment_status || 'unpaid').toLowerCase() === 'paid';
+    return esc(method) + ' ' + (paid
+      ? '<span class="status-pill status-done">paid</span>'
+      : '<span class="status-pill status-new">unpaid</span>');
+  };
   document.getElementById('ordersTable').innerHTML = `
-    <table><thead><tr><th>Order</th><th>Email</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Order</th><th>Customer</th><th>Ship to</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows.map(o => `<tr>
-      <td>${esc(o.num)}</td><td>${esc(o.email)}</td><td>${esc(o.items)}</td><td>$${Number(o.total).toFixed(2)}</td>
+      <td>${esc(o.num)}</td>
+      <td>${esc(o.email)}</td>
+      <td>${esc(o.ship_name || '—')}${o.ship_city ? '<br><small>' + esc(o.ship_city) + (o.ship_zip ? ' ' + esc(o.ship_zip) : '') + (o.ship_country ? ', ' + esc(o.ship_country) : '') + '</small>' : ''}${o.ship_phone ? '<br><small>' + esc(o.ship_phone) + '</small>' : ''}</td>
+      <td>${esc(o.items)}</td><td>$${Number(o.total).toFixed(2)}</td>
+      <td>${pay(o)}</td>
       <td>${pill(o.status)}</td>
       <td><select onchange="setOrderStatus('${esc(o.num)}', this.value)" style="width:auto;padding:6px 10px">
         <option ${/in transit/i.test(o.status)?'selected':''}>In transit 🚚</option>
         <option ${/out for delivery/i.test(o.status)?'selected':''}>Out for delivery 📦</option>
         <option ${/delivered/i.test(o.status)?'selected':''}>Delivered ✅</option>
       </select>
+      <button class="btn small ghost" onclick="togglePaid('${esc(o.num)}', '${String(o.payment_status||'unpaid').toLowerCase() === 'paid' ? 'unpaid' : 'paid'}')">${String(o.payment_status||'unpaid').toLowerCase() === 'paid' ? 'Mark unpaid' : 'Mark paid'}</button>
       <button class="btn small danger" onclick="deleteOrder('${esc(o.num)}')">Delete</button></td>
     </tr>`).join('')}</tbody></table>`;
 }
 async function setOrderStatus(num, status){ await api('/admin/orders', { method:'PUT', body:{ num, status } }); await loadOrders(); }
+async function togglePaid(num, payment_status){ await api('/admin/orders', { method:'PUT', body:{ num, payment_status } }); await loadOrders(); }
 async function deleteOrder(num){ if(!confirm('Delete order ' + num + '?')) return; await api('/admin/orders', { method:'DELETE', body:{ num } }); await loadOrders(); }
 
 /* ---- Wishlist ---- */
@@ -359,20 +374,17 @@ async function loadWishlist(){
   const rows = r.ok ? r.wishlist : [];
   if(!rows.length){ document.getElementById('wishlistTable').innerHTML = '<div class="empty">No wishlist entries yet.</div>'; return; }
   document.getElementById('wishlistTable').innerHTML = `
-    <table><thead><tr><th>ID</th><th>Session</th><th>Product</th><th>Price</th><th></th></tr></thead>
+    <table><thead><tr><th>ID</th><th>Owner</th><th>Product</th><th>Price</th><th></th></tr></thead>
     <tbody>${rows.map(w => `<tr>
-      <td>${esc(w.id)}</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(w.session_token)}</td>
+      <td>${esc(w.id)}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.user_id ? 'Account #' + esc(w.user_id) : esc(w.session_token || 'guest session')}</td>
       <td>${esc(w.product_name)}</td><td>$${Number(w.price).toFixed(2)}</td>
       <td><button class="btn small danger" onclick="deleteWish(${w.id})">Delete</button></td>
     </tr>`).join('')}</tbody></table>`;
 }
 async function deleteWish(id){
   if(!confirm('Delete this wishlist entry?')) return;
-  const r = await api('/admin/wishlist', { method:'GET' });
-  const row = (r.ok ? r.wishlist : []).find(x => x.id === id);
-  if(row){
-    await fetch(API + '/wishlist', { method:'DELETE', headers:{ 'Content-Type':'application/json', 'x-session': row.session_token }, body: JSON.stringify({ product_id: row.product_id }) });
-  }
+  await api('/admin/wishlist', { method:'DELETE', body:{ id } });
   await loadWishlist();
 }
 
