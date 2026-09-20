@@ -3,6 +3,7 @@
 const { supabase } = require('./_supabase');
 const { hashPassword, verifyPassword, makeToken } = require('./_crypto');
 const safepay = require('./_safepay');
+const pricing = require('./_pricing');
 
 function send(res, code, data){
   const body = JSON.stringify(data);
@@ -107,24 +108,54 @@ async function listWishlist(sessionKey, userId){
   return (data || []).map(r => r.product_id);
 }
 
+// Prices a cart from the database. The browser only ever tells us WHAT is being
+// bought, never what it costs: a request that claims a price, a subtotal or a
+// total is ignored entirely. Without this, anyone with devtools could order a
+// Rs 25,452 basket and be charged Rs 1.
+async function priceCart(items){
+  const qtyById = new Map();
+  for(const it of (Array.isArray(items) ? items : [])){
+    const id = Number(it && it.product_id);
+    const qty = Math.floor(Number(it && it.qty));
+    if(!id || !Number.isFinite(qty) || qty <= 0) continue;
+    qtyById.set(id, (qtyById.get(id) || 0) + qty);
+  }
+  if(!qtyById.size) return { ok:false, error:'Your cart is empty' };
+
+  const { data: rows, error } = await supabase
+    .from('products').select('id, name, price').in('id', [...qtyById.keys()]);
+  if(error) throw error;
+  const byId = new Map((rows || []).map(r => [Number(r.id), r]));
+
+  const priced = [];
+  for(const [id, qty] of qtyById){
+    const p = byId.get(id);
+    if(!p) return { ok:false, error:'One of the items in your bag is no longer available' };
+    priced.push({ product_id: id, name: String(p.name), price: Number(p.price) || 0, qty });
+  }
+  const subtotal = priced.reduce((s, i) => s + i.price * i.qty, 0);
+  return { ok:true, items: priced, subtotal };
+}
+
 // One place that writes an order, so the cash-on-delivery path and the card
-// path can never drift apart. Returns the row the caller needs to respond with.
-async function insertOrder({ body, user, sessionKey, paymentMethod, paymentStatus }){
+// path can never drift apart. `items` and `total` must already be the priced,
+// server-computed values — never anything taken from the request body.
+async function insertOrder({ body, user, sessionKey, paymentMethod, paymentStatus, items, total }){
   const b = body || {};
   const email = (user ? user.email : String(b.email || 'guest')).toLowerCase();
   const num = 'MV-' + Date.now().toString(36).toUpperCase().slice(-6);
-  const items = Array.isArray(b.items) ? b.items : [];
-  const total = Number(b.total) || 0;
+  const lines = Array.isArray(items) ? items : [];
+  const amount = Number(total) || 0;
 
   const { data: ins, error } = await supabase.from('orders').insert({
-    num, user_id: user ? user.id : null, email, total, items: items.length,
+    num, user_id: user ? user.id : null, email, total: amount, items: lines.length,
     ship_name: String(b.name||''), ship_phone: String(b.phone||''), ship_address: String(b.address||''),
     ship_city: String(b.city||''), ship_country: String(b.country||''), ship_zip: String(b.zip||''),
     payment_method: String(paymentMethod || ''), payment_status: String(paymentStatus || 'unpaid')
   }).select('id').single();
   if(error) throw error;
 
-  for(const it of items){
+  for(const it of lines){
     await supabase.from('order_items').insert({
       order_id: ins.id, product_id: Number(it.product_id),
       name: String(it.name||''), price: Number(it.price||0), qty: Number(it.qty||1)
@@ -132,7 +163,7 @@ async function insertOrder({ body, user, sessionKey, paymentMethod, paymentStatu
   }
   await supabase.from('cart_items').delete().eq('session_token', sessionKey);
 
-  return { id: ins.id, num, email, total, itemCount: items.length };
+  return { id: ins.id, num, email, total: amount, itemCount: lines.length };
 }
 
 // A Safepay webhook or return-URL check both need to settle an order the same
@@ -263,8 +294,13 @@ async function handleApi(req, res){
     if(p === '/api/orders' && method === 'POST'){
       const b = await readBody(req);
       const u = await userFromReq(req);
+      // Priced from the database, never from the request body.
+      const priced = await priceCart(b.items);
+      if(!priced.ok) return send(res, 400, { ok:false, error: priced.error });
+      const totals = pricing.computeTotals(priced.subtotal);
       const order = await insertOrder({
         body: b, user: u, sessionKey,
+        items: priced.items, total: totals.total,
         paymentMethod: b.payment_method, paymentStatus: 'unpaid'
       });
       return send(res, 200, { ok:true, order:{
@@ -337,16 +373,25 @@ async function handleApi(req, res){
       if(!safepay.isConfigured()) return send(res, 503, { ok:false, error:'Card payments are not set up yet' });
       const b = await readBody(req);
       const currency = String(b.currency || '').toUpperCase();
-      const amount = Number(b.amount);
-      const items = Array.isArray(b.items) ? b.items : [];
-      if(!items.length) return send(res, 400, { ok:false, error:'Your cart is empty' });
-      if(!(amount > 0)) return send(res, 400, { ok:false, error:'amount required' });
       if(!safepay.SUPPORTED_CURRENCIES.includes(currency)){
         return send(res, 400, { ok:false, error:`Card payment is not available in ${currency || 'that currency'}. Please switch currency or choose cash on delivery.` });
       }
 
+      // What it costs is decided here, from the database. A `total` or `amount`
+      // in the request body is ignored — those are the customer's to see, not to
+      // set. Before this, a tampered request could pay Rs 1 for a Rs 25,452 cart.
+      const priced = await priceCart(b.items);
+      if(!priced.ok) return send(res, 400, { ok:false, error: priced.error });
+      const totals = pricing.computeTotals(priced.subtotal);
+      const charge = pricing.chargeAmount(totals.total, currency);
+      if(!(charge > 0)) return send(res, 400, { ok:false, error:'This order has no chargeable amount' });
+
       const u = await userFromReq(req);
-      const order = await insertOrder({ body: b, user: u, sessionKey, paymentMethod: 'card', paymentStatus: 'unpaid' });
+      const order = await insertOrder({
+        body: b, user: u, sessionKey,
+        items: priced.items, total: totals.total,
+        paymentMethod: 'card', paymentStatus: 'unpaid'
+      });
       const origin = String(req.headers.origin || `http://${req.headers.host || 'localhost:4321'}`).replace(/\/+$/, '');
 
       try {
@@ -358,7 +403,7 @@ async function handleApi(req, res){
           entry_mode: 'raw',
           currency,
           // Amount is in the lowest denomination for every currency, PKR too.
-          amount: safepay.toMinorUnits(amount),
+          amount: safepay.toMinorUnits(charge),
           // Safepay whitelists metadata keys; order_id is echoed back on webhooks.
           metadata: { order_id: order.num }
         });
@@ -375,7 +420,7 @@ async function handleApi(req, res){
         // Recorded before the shopper is redirected, so an arriving webhook can
         // always find the order.
         await supabase.from('orders').update({ payment_ref: tracker }).eq('id', order.id);
-        return send(res, 200, { ok:true, url: checkoutUrl, num: order.num, tracker });
+        return send(res, 200, { ok:true, url: checkoutUrl, num: order.num, tracker, total: order.total, amount: charge, currency });
       } catch(err){
         console.error('Safepay checkout failed:', (err && err.message) || err);
         // No payment can be taken, so the order must not linger as if it were real.
@@ -557,4 +602,4 @@ async function handleApi(req, res){
   }
 }
 
-module.exports = { handleApi, send, readBody, readRawBody, userFromReq, listCart, listWishlist, insertOrder, markOrderPaid };
+module.exports = { handleApi, send, readBody, readRawBody, userFromReq, listCart, listWishlist, insertOrder, markOrderPaid, priceCart };

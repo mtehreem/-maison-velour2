@@ -2551,10 +2551,9 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
     zip: document.getElementById('bZip').value.trim()
   };
 
-  const items = resolvedCart().map(i => {
-    const p = findProduct(i.id);
-    return { product_id: p.id, name: p.name, price: p.price, qty: i.qty };
-  });
+  // Only what is being bought. Prices are looked up server-side from the
+  // database, so a tampered request cannot set its own total.
+  const items = resolvedCart().map(i => ({ product_id: i.id, qty: i.qty }));
 
   const btn = document.getElementById('placeOrder');
   const btnLabel = btn.textContent;
@@ -2582,8 +2581,7 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
       method:'POST',
       headers: authHeaders,
       body:{
-        items, total: Math.round(total*100)/100,
-        currency: currentCurrency, amount: payableAmount(total),
+        items, currency: currentCurrency,
         email: billing.email, name: billing.name, phone: billing.phone,
         address: billing.address, city: billing.city, country: billing.country,
         zip: billing.zip
@@ -2612,7 +2610,7 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
       method:'POST',
       headers: authHeaders,
       body:{
-        items, total: Math.round(total*100)/100,
+        items,
         email: billing.email, name: billing.name, phone: billing.phone,
         address: billing.address, city: billing.city, country: billing.country,
         zip: billing.zip, payment_method: pay
@@ -2639,6 +2637,9 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
   }
 
   const orderNum = (dbRes.order && dbRes.order.num) || ('MV-' + Date.now().toString(36).toUpperCase().slice(-6));
+  // The server prices the order itself. Show its figure, not ours, so the
+  // receipt can never claim a total the order was not recorded with.
+  const serverTotal = (dbRes.order && Number.isFinite(Number(dbRes.order.total))) ? Number(dbRes.order.total) : total;
   document.getElementById('orderNum').textContent = 'Order ' + orderNum;
 
   document.getElementById('checkoutView').style.display = 'none';
@@ -2656,7 +2657,7 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
       <div class="nd-row"><span>Shipping</span><b>${ship === 0 ? 'Free' : notifMoney(ship)}</b></div>
       ${discount > 0 ? `<div class="nd-row"><span>Loyalty discount</span><b>−${notifMoney(discount)}</b></div>` : ''}
       <div class="nd-row"><span>Deliver to</span><b>${esc(billing.name)}<br>${esc(billing.address)}, ${esc(billing.city)}<br>${esc(billing.phone)}</b></div>
-      <div class="nd-total"><span>Total</span><b>${notifMoney(total)}</b></div>
+      <div class="nd-total"><span>Total</span><b>${notifMoney(serverTotal)}</b></div>
       <div class="nd-row" style="margin-top:6px"><span>Delivery success rate</span><b>98.7%</b></div>`,
     thanks:'Thank you for placing your order — your luxury edit is being prepared with signature care.',
     duration: 9000
