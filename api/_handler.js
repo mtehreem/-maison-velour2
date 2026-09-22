@@ -603,6 +603,11 @@ async function handleApi(req, res){
       if(!whatsapp.isConfigured()) return send(res, 200, { ok:true, configured:false, read: messages.length });
 
       for(const msg of messages){
+        // Only the last four digits of the sender, never the whole number: enough
+        // to tell one tester from another in the logs without writing a
+        // customer's phone number into them.
+        console.log('WhatsApp incoming from ****' + String(msg.from).slice(-4) +
+                    ' (' + String(msg.text || '').length + ' chars)');
         try { await replyToWhatsappMessage(msg); }
         catch(e){ console.error('WhatsApp reply failed:', (e && e.message) || e); }
       }
