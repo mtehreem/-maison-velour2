@@ -76,7 +76,10 @@ function extractMessages(payload){
                    : (msg.button && msg.button.text) ? msg.button.text
                    : (msg.interactive && msg.interactive.list_reply && msg.interactive.list_reply.title) ? msg.interactive.list_reply.title
                    : '';
-        if(text) out.push({ from, id, text: text.trim() });
+        // A photo or voice note cannot be read, but it still deserves an answer.
+        // Returning it with an empty body lets the caller say so, rather than
+        // leaving the customer talking to silence.
+        out.push({ from, id, text: text.trim(), type: String(msg.type || 'unknown') });
       }
     }
   }
@@ -86,7 +89,7 @@ function extractMessages(payload){
 // Postcodes and order numbers are pulled out of free text. People type them any
 // way they like, so this is deliberately forgiving.
 function parseTracking(text){
-  const s = String(text || '').toUpperCase();
+  const s = String(text || '').toUpperCase().trim();
   const order = (s.match(/\bMV-[A-Z0-9]{6,10}\b/) || [])[0] || '';
   let postcode = '';
   if(order){
@@ -96,7 +99,13 @@ function parseTracking(text){
       .filter(t => !/^MV-/.test(t));
     postcode = candidate[0] || '';
   }
-  return { order, postcode };
+  // A short message that is nothing but a postcode usually means they are
+  // answering the postcode question and have not given the order number yet.
+  // Without this they get asked for both again, which reads like we ignored them.
+  const tokens = s.split(/\s+/).filter(Boolean);
+  const postcodeOnly = !order && tokens.length === 1 &&
+    /^[A-Z0-9][A-Z0-9-]{2,9}$/.test(tokens[0]) && /[0-9]/.test(tokens[0]);
+  return { order, postcode, postcodeOnly };
 }
 
 // Keys and types only — never values. Meta's envelope is documented poorly and
@@ -153,7 +162,34 @@ const FAQ =
 const ESCALATE =
   'Let me bring in a member of the team — they will reply here shortly ✨';
 
-const NEED_HUMAN = 'What is your order number and the delivery postcode?';
+const NEED_HUMAN =
+  'Happy to check 📦 I need the delivery postcode as well as the order number — ' +
+  'send them together, like this:\nMV-8Z28PN 54000';
+
+// Deliberately the same wording whether the order number is unknown or the
+// postcode is wrong. Saying which one failed would let somebody probe for other
+// people's order numbers.
+const ORDER_NOT_FOUND =
+  "I couldn't find an order matching that number and postcode. 📦\n\n" +
+  'Worth checking:\n' +
+  '• the order number looks like MV-8Z28PN\n' +
+  '• the postcode is the one on the delivery address\n\n' +
+  'Try again, or reply 3 and I will bring in a person.';
+
+const NEED_ORDER_NUMBER =
+  'Thanks — I have the postcode 👍 I just need the order number too. ' +
+  'It looks like MV-8Z28PN, and you will find it on your confirmation.';
+
+const UNSUPPORTED_TYPE =
+  "I can only read text I'm afraid 🙈 I can't open photos, voice notes or files. " +
+  'Send it in words, or reply 3 and I will bring in a person.';
+
+const DIDNT_UNDERSTAND =
+  'Sorry, I did not catch that ✨ I can help with:\n\n' +
+  '1. 📦 Track my order\n' +
+  '2. ❓ Delivery, returns & payment questions\n' +
+  '3. 👤 Talk to a person\n\n' +
+  'Reply with a number, or ask in your own words.';
 
 // Only these fields are ever sent back over WhatsApp. The model never sees the
 // customer's address, phone or email, so it cannot be talked into reading them.
@@ -253,5 +289,6 @@ async function aiReply(userText, orderContext){
 module.exports = {
   config, isConfigured, canReplyWithAi, verifySignature, extractMessages,
   parseTracking, publicOrder, formatOrder, sendText, aiReply, describeShape, hasStatuses,
-  MENU, ASK_TRACKING, FAQ, ESCALATE, NEED_HUMAN
+  MENU, ASK_TRACKING, FAQ, ESCALATE, NEED_HUMAN,
+  ORDER_NOT_FOUND, NEED_ORDER_NUMBER, UNSUPPORTED_TYPE, DIDNT_UNDERSTAND
 };

@@ -219,19 +219,29 @@ async function replyToWhatsappMessage(msg){
   const lower = text.toLowerCase().trim();
   const reply = body => whatsapp.sendText(msg.from, body);
 
+  // A photo, voice note or file. We cannot read it, and staying silent is the
+  // worst possible answer, so say so.
+  if(!text){
+    return reply(whatsapp.UNSUPPORTED_TYPE);
+  }
+
   if(/^(hi|hello|hey|menu|start|help|salam|assalam|salaam)/i.test(lower)){
     return reply(whatsapp.MENU);
   }
 
-  const { order, postcode } = whatsapp.parseTracking(text);
+  const { order, postcode, postcodeOnly } = whatsapp.parseTracking(text);
 
   if(order && postcode){
     const row = await lookupOrderForBot(order, postcode);
     if(row) return reply(whatsapp.formatOrder(whatsapp.publicOrder(row)));
-    return reply("I couldn't match that order number and postcode. Check both and try again — or reply 3 and I'll bring in a person.");
+    return reply(whatsapp.ORDER_NOT_FOUND);
   }
   if(order && !postcode){
     return reply(whatsapp.NEED_HUMAN);
+  }
+  // Just a postcode, with no order number yet.
+  if(postcodeOnly){
+    return reply(whatsapp.NEED_ORDER_NUMBER);
   }
   if(/^1\b/.test(lower) || /track/i.test(lower)){
     return reply(whatsapp.ASK_TRACKING);
@@ -247,10 +257,10 @@ async function replyToWhatsappMessage(msg){
   // is never left without a reply.
   try {
     const ai = await whatsapp.aiReply(text, null);
-    return reply(ai || whatsapp.MENU);
+    return reply(ai || whatsapp.DIDNT_UNDERSTAND);
   } catch(e){
     console.error('WhatsApp AI reply failed:', (e && e.message) || e);
-    return reply(whatsapp.MENU);
+    return reply(whatsapp.DIDNT_UNDERSTAND);
   }
 }
 
