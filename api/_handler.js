@@ -4,6 +4,7 @@ const { supabase } = require('./_supabase');
 const { hashPassword, verifyPassword, makeToken } = require('./_crypto');
 const safepay = require('./_safepay');
 const pricing = require('./_pricing');
+const crypto = require('crypto');
 
 function send(res, code, data){
   const body = JSON.stringify(data);
@@ -108,6 +109,20 @@ async function listWishlist(sessionKey, userId){
   return (data || []).map(r => r.product_id);
 }
 
+// Order numbers used to be the last six characters of a base-36 timestamp, which
+// repeats every 36^6 ms — about 25 days. Because `num` is UNIQUE that made a
+// collision fail the insert outright: a customer's checkout erroring for no
+// reason of theirs. Random instead, and drawn from an alphabet with no 0/O or
+// 1/I so it survives being read aloud over the phone.
+const ORDER_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';   // exactly 32, so the
+                                                             // modulo stays unbiased
+function makeOrderNumber(){
+  const bytes = crypto.randomBytes(8);
+  let out = '';
+  for(let i = 0; i < 8; i++) out += ORDER_ALPHABET[bytes[i] % ORDER_ALPHABET.length];
+  return 'MV-' + out;
+}
+
 // Prices a cart from the database. The browser only ever tells us WHAT is being
 // bought, never what it costs: a request that claims a price, a subtotal or a
 // total is ignored entirely. Without this, anyone with devtools could order a
@@ -143,7 +158,7 @@ async function priceCart(items){
 async function insertOrder({ body, user, sessionKey, paymentMethod, paymentStatus, items, total }){
   const b = body || {};
   const email = (user ? user.email : String(b.email || 'guest')).toLowerCase();
-  const num = 'MV-' + Date.now().toString(36).toUpperCase().slice(-6);
+  const num = makeOrderNumber();
   const lines = Array.isArray(items) ? items : [];
   const amount = Number(total) || 0;
 

@@ -2636,7 +2636,9 @@ document.getElementById('placeOrder').addEventListener('click', async () => {
     return;
   }
 
-  const orderNum = (dbRes.order && dbRes.order.num) || ('MV-' + Date.now().toString(36).toUpperCase().slice(-6));
+  // Always the number the server actually stored. Inventing one here would put
+  // an order number on the confirmation that exists nowhere in the database.
+  const orderNum = (dbRes.order && dbRes.order.num) || '';
   // The server prices the order itself. Show its figure, not ours, so the
   // receipt can never claim a total the order was not recorded with.
   const serverTotal = (dbRes.order && Number.isFinite(Number(dbRes.order.total))) ? Number(dbRes.order.total) : total;
