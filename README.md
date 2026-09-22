@@ -50,6 +50,7 @@ account. It is safe to re-run.
 | `scripts/seed.js` | Creates the schema and seeds the catalogue + admin user. |
 | `vercel.json` | Routes `/api/*` to the serverless function. |
 | `PAYMENTS.md` | **Card payments** — how the flow works, where to watch payments, and how to go live. |
+| `WHATSAPP.md` | **WhatsApp assistant** — every reply it gives, the Meta setup, and every trap encountered. |
 | `.env` | **Secret.** Database credentials. Never commit this. |
 
 Files starting with `_` inside `api/` are shared modules, not routes.

@@ -398,17 +398,18 @@
   .mo-unpaid{background:rgba(179,64,63,.10);color:var(--error)}
   .mo-empty{font-size:.8rem;color:var(--ink-soft)}
   /* WhatsApp support entry point. Number must be international format with no
-     +, spaces or dashes. */
+     +, spaces or dashes. The glyph is WhatsApp's own green (#25D366) on the
+     house noir, so it reads as WhatsApp without fighting the palette. */
   .wa-float{
     position:fixed;right:22px;bottom:22px;z-index:60;
     width:58px;height:58px;border-radius:50%;
     display:grid;place-items:center;text-decoration:none;
-    background:var(--noir);color:var(--gold-bright);
-    border:1px solid rgba(197,160,89,.55);box-shadow:var(--shadow-sm);
-    transition:transform .2s ease, background .2s ease;
+    background:var(--noir);color:#25D366;
+    border:1px solid rgba(37,211,102,.45);box-shadow:var(--shadow-sm);
+    transition:transform .2s ease, background .2s ease, border-color .2s ease;
   }
   .wa-float svg{width:30px;height:30px;display:block;fill:currentColor}
-  .wa-float:hover{background:var(--noir-deep);transform:translateY(-2px)}
+  .wa-float:hover{background:var(--noir-deep);border-color:rgba(37,211,102,.85);transform:translateY(-2px)}
   @media (max-width:640px){ .wa-float{right:16px;bottom:16px;width:52px;height:52px} .wa-float svg{width:26px;height:26px} }
   .lc-btn.ghost{
     background:transparent;border:1px solid rgba(179,64,63,.5);color:var(--error);
