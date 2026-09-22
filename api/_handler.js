@@ -4,6 +4,7 @@ const { supabase } = require('./_supabase');
 const { hashPassword, verifyPassword, makeToken } = require('./_crypto');
 const safepay = require('./_safepay');
 const pricing = require('./_pricing');
+const whatsapp = require('./_whatsapp');
 const crypto = require('crypto');
 
 function send(res, code, data){
@@ -194,6 +195,63 @@ async function markOrderPaid(order){
     .select('*')
     .single();
   return data || order;
+}
+
+// Order lookup for the WhatsApp bot. Same rule as /api/orders/track: the order
+// number alone is never enough, the postcode must match too. Orders placed
+// before the postcode column existed have none stored and still match.
+async function lookupOrderForBot(orderNumber, postcode){
+  const num = String(orderNumber || '').trim().toUpperCase();
+  const zip = String(postcode || '').trim();
+  if(!num || !zip) return null;
+  const { data: o } = await supabase.from('orders').select('*').eq('num', num).maybeSingle();
+  if(!o) return null;
+  const stored = String(o.ship_zip || '').trim();
+  if(stored && stored.toLowerCase() !== zip.toLowerCase()) return null;
+  return o;
+}
+
+// One incoming WhatsApp message -> one reply. Scripted replies handle the menu
+// and tracking; the model is only consulted for everything else, and never
+// supplies order data itself.
+async function replyToWhatsappMessage(msg){
+  const text = String(msg.text || '');
+  const lower = text.toLowerCase().trim();
+  const reply = body => whatsapp.sendText(msg.from, body);
+
+  if(/^(hi|hello|hey|menu|start|help|salam|assalam|salaam)/i.test(lower)){
+    return reply(whatsapp.MENU);
+  }
+
+  const { order, postcode } = whatsapp.parseTracking(text);
+
+  if(order && postcode){
+    const row = await lookupOrderForBot(order, postcode);
+    if(row) return reply(whatsapp.formatOrder(whatsapp.publicOrder(row)));
+    return reply("I couldn't match that order number and postcode. Check both and try again — or reply 3 and I'll bring in a person.");
+  }
+  if(order && !postcode){
+    return reply(whatsapp.NEED_HUMAN);
+  }
+  if(/^1\b/.test(lower) || /track/i.test(lower)){
+    return reply(whatsapp.ASK_TRACKING);
+  }
+  if(/^2\b/.test(lower) || /faq|question|deliver|return|refund|payment|shipping/i.test(lower)){
+    return reply(whatsapp.FAQ);
+  }
+  if(/^3\b/.test(lower) || /human|agent|person|speak|complain/i.test(lower)){
+    return reply(whatsapp.ESCALATE);
+  }
+
+  // Anything else goes to the model, with a scripted fallback so the customer
+  // is never left without a reply.
+  try {
+    const ai = await whatsapp.aiReply(text, null);
+    return reply(ai || whatsapp.MENU);
+  } catch(e){
+    console.error('WhatsApp AI reply failed:', (e && e.message) || e);
+    return reply(whatsapp.MENU);
+  }
 }
 
 async function handleApi(req, res){
@@ -503,6 +561,45 @@ async function handleApi(req, res){
       return send(res, 200, { ok:true });
     }
 
+    /* ---- WhatsApp bot (Meta Cloud API) ---- */
+    // Meta calls this once, when the webhook URL is saved, to prove the endpoint
+    // is ours. It must echo the challenge back as plain text — not JSON.
+    if(p === '/api/whatsapp/webhook' && method === 'GET'){
+      const mode = url.searchParams.get('hub.mode');
+      const token = url.searchParams.get('hub.verify_token');
+      const challenge = url.searchParams.get('hub.challenge') || '';
+      const expected = whatsapp.config().verifyToken;
+      if(mode === 'subscribe' && expected && token === expected){
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        return res.end(challenge);
+      }
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      return res.end('Forbidden');
+    }
+
+    // Incoming messages. This endpoint is public, so the signature is the only
+    // thing between the bot and forged traffic.
+    if(p === '/api/whatsapp/webhook' && method === 'POST'){
+      const raw = await readRawBody(req);
+      if(!whatsapp.verifySignature(raw, req.headers['x-hub-signature-256'])){
+        return send(res, 401, { ok:false, error:'Invalid signature' });
+      }
+      let payload;
+      try { payload = JSON.parse(raw || '{}'); } catch(e){ return send(res, 200, { ok:true }); }
+
+      // Acknowledge before doing anything: Meta retries on a non-2xx, and a retry
+      // would send the customer the same reply a second time. Status updates
+      // (delivered, read) also arrive here and need no reply at all.
+      if(!whatsapp.isConfigured()) return send(res, 200, { ok:true, configured:false });
+
+      const messages = whatsapp.extractMessages(payload);
+      for(const msg of messages){
+        try { await replyToWhatsappMessage(msg); }
+        catch(e){ console.error('WhatsApp reply failed:', (e && e.message) || e); }
+      }
+      return send(res, 200, { ok:true, handled: messages.length });
+    }
+
     /* ---- Admin (is_admin required) ---- */
     const adminUser = await userFromReq(req);
     const requireAdmin = () => (adminUser && Number(adminUser.is_admin) === 1) ? null : 'forbidden';
@@ -617,4 +714,4 @@ async function handleApi(req, res){
   }
 }
 
-module.exports = { handleApi, send, readBody, readRawBody, userFromReq, listCart, listWishlist, insertOrder, markOrderPaid, priceCart };
+module.exports = { handleApi, send, readBody, readRawBody, userFromReq, listCart, listWishlist, insertOrder, markOrderPaid, priceCart, lookupOrderForBot, makeOrderNumber };

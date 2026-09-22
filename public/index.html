@@ -397,6 +397,18 @@
   .mo-paid{background:rgba(62,138,99,.12);color:var(--success)}
   .mo-unpaid{background:rgba(179,64,63,.10);color:var(--error)}
   .mo-empty{font-size:.8rem;color:var(--ink-soft)}
+  /* WhatsApp support entry point. Number must be international format with no
+     +, spaces or dashes. */
+  .wa-float{
+    position:fixed;right:22px;bottom:22px;z-index:60;
+    width:58px;height:58px;border-radius:50%;
+    display:grid;place-items:center;font-size:1.45rem;text-decoration:none;
+    background:var(--noir);color:var(--gold-bright);
+    border:1px solid rgba(197,160,89,.55);box-shadow:var(--shadow-sm);
+    transition:transform .2s ease, background .2s ease;
+  }
+  .wa-float:hover{background:var(--noir-deep);transform:translateY(-2px)}
+  @media (max-width:640px){ .wa-float{right:16px;bottom:16px;width:52px;height:52px} }
   .lc-btn.ghost{
     background:transparent;border:1px solid rgba(179,64,63,.5);color:var(--error);
     box-shadow:none;
@@ -1756,6 +1768,12 @@
 
 <!-- Notifications -->
 <div class="notif-stack" id="notifStack"></div>
+
+<!-- WhatsApp support. The number must be your WhatsApp Business number in
+     international format, digits only. -->
+<a class="wa-float" id="waFloat" target="_blank" rel="noopener noreferrer"
+   href="https://wa.me/15551788880?text=Hi%20Maison%20Velour%2C%20I%27d%20like%20help%20with%20an%20order"
+   aria-label="Chat with us on WhatsApp">💬</a>
 
 <script>
 /* ============================================================
