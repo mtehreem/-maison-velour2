@@ -99,6 +99,24 @@ function parseTracking(text){
   return { order, postcode };
 }
 
+// Keys and types only — never values. Meta's envelope is documented poorly and
+// the shape could change under us; if a payload arrives that we cannot read a
+// message out of, this makes it diagnosable from the deployment logs without
+// ever writing a customer's message into them.
+function describeShape(node, depth, maxDepth){
+  depth = depth || 0;
+  maxDepth = maxDepth || 6;
+  if(depth > maxDepth) return '...';
+  if(Array.isArray(node)) return node.length ? [describeShape(node[0], depth + 1, maxDepth)] : [];
+  if(node && typeof node === 'object'){
+    const out = {};
+    for(const k of Object.keys(node)) out[k] = describeShape(node[k], depth + 1, maxDepth);
+    return out;
+  }
+  if(typeof node === 'string') return '<string>';
+  return typeof node;
+}
+
 const MENU =
   'Welcome to Maison Velour ✨ How can I help?\n\n' +
   '1. 📦 Track my order\n' +
@@ -208,6 +226,6 @@ async function aiReply(userText, orderContext){
 
 module.exports = {
   config, isConfigured, canReplyWithAi, verifySignature, extractMessages,
-  parseTracking, publicOrder, formatOrder, sendText, aiReply,
+  parseTracking, publicOrder, formatOrder, sendText, aiReply, describeShape,
   MENU, ASK_TRACKING, FAQ, ESCALATE, NEED_HUMAN
 };

@@ -587,12 +587,21 @@ async function handleApi(req, res){
       let payload;
       try { payload = JSON.parse(raw || '{}'); } catch(e){ return send(res, 200, { ok:true }); }
 
-      // Acknowledge before doing anything: Meta retries on a non-2xx, and a retry
-      // would send the customer the same reply a second time. Status updates
-      // (delivered, read) also arrive here and need no reply at all.
-      if(!whatsapp.isConfigured()) return send(res, 200, { ok:true, configured:false });
-
       const messages = whatsapp.extractMessages(payload);
+      if(!messages.length && payload && Array.isArray(payload.entry) && payload.entry.length){
+        // Something arrived that we could not read a message from. Log its SHAPE
+        // only, never its contents, so a Meta format change is diagnosable from
+        // the deployment logs without capturing customer messages. This runs
+        // before the credentials check on purpose: the first real message will
+        // arrive before the access token does, and this is how we find out
+        // whether our reader matches Meta's actual envelope.
+        console.warn('WhatsApp payload with no readable message. Shape:', JSON.stringify(whatsapp.describeShape(payload)));
+      }
+
+      // Nothing can be sent without an access token, but the payload has been
+      // accepted and logged above.
+      if(!whatsapp.isConfigured()) return send(res, 200, { ok:true, configured:false, read: messages.length });
+
       for(const msg of messages){
         try { await replyToWhatsappMessage(msg); }
         catch(e){ console.error('WhatsApp reply failed:', (e && e.message) || e); }
