@@ -191,6 +191,11 @@ async function sendText(to, body){
   return json;
 }
 
+// Model names churn fast — gemini-2.0-flash and gemini-2.5-flash were both
+// retired between writing this and testing it ("no longer available", 404). So
+// try a short list in order rather than betting on one name surviving.
+const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+
 // The AI layer. Nothing here is trusted with order data: it may only phrase a
 // reply, and if it fails for any reason the caller falls back to a scripted one.
 async function aiReply(userText, orderContext){
@@ -203,25 +208,32 @@ async function aiReply(userText, orderContext){
     'for their order number AND delivery postcode. Never ask for card or bank details.\n\n' +
     (orderContext ? 'The order lookup already returned: ' + JSON.stringify(orderContext) + '\n\n' : '') +
     'Customer: ' + userText;
-  // Google currently documents two different Gemini APIs: this long-standing
-  // generateContent shape, and a newer /v1beta/interactions one. This has NOT
-  // been verified against a live key — the first thing to check once
-  // GEMINI_API_KEY exists is whether this call succeeds, and if it 404s, switch
-  // the URL and body to the interactions shape.
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${c.geminiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+
+  let lastError = '';
+  for(const model of GEMINI_MODELS){
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(c.geminiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      }
+    );
+    const json = await res.json().catch(() => null);
+    if(res.ok){
+      const parts = json && json.candidates && json.candidates[0] && json.candidates[0].content &&
+                    json.candidates[0].content.parts;
+      const text = Array.isArray(parts) ? parts.map(p => p.text || '').join('').trim() : '';
+      if(text) return text;
+      lastError = 'empty reply from ' + model;
+      continue;
     }
-  );
-  const json = await res.json().catch(() => null);
-  if(!res.ok) throw new Error('Gemini failed: ' + ((json && json.error && json.error.message) || res.status));
-  const parts = json && json.candidates && json.candidates[0] && json.candidates[0].content &&
-                json.candidates[0].content.parts;
-  const text = Array.isArray(parts) ? parts.map(p => p.text || '').join('').trim() : '';
-  return text || null;
+    lastError = `${model}: ${(json && json.error && json.error.message) || res.status}`;
+    // 404 means the model name is retired — worth trying the next one.
+    // Anything else (quota, outage) will not be fixed by a different name
+    // but costs nothing to try.
+  }
+  throw new Error('Gemini failed: ' + lastError);
 }
 
 module.exports = {
