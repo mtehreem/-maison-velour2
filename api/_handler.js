@@ -588,7 +588,8 @@ async function handleApi(req, res){
       try { payload = JSON.parse(raw || '{}'); } catch(e){ return send(res, 200, { ok:true }); }
 
       const messages = whatsapp.extractMessages(payload);
-      if(!messages.length && payload && Array.isArray(payload.entry) && payload.entry.length){
+      if(!messages.length && !whatsapp.hasStatuses(payload) &&
+         payload && Array.isArray(payload.entry) && payload.entry.length){
         // Something arrived that we could not read a message from. Log its SHAPE
         // only, never its contents, so a Meta format change is diagnosable from
         // the deployment logs without capturing customer messages. This runs

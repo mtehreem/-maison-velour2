@@ -117,6 +117,20 @@ function describeShape(node, depth, maxDepth){
   return typeof node;
 }
 
+// Delivery and read receipts arrive on the same endpoint as messages. They carry
+// `statuses` rather than `messages`, need no reply, and are not a parsing
+// failure — so the shape warning must not fire for them, or the logs fill with
+// false alarms and real problems get lost in the noise.
+function hasStatuses(payload){
+  for(const entry of (payload && payload.entry) || []){
+    for(const change of (entry.changes) || []){
+      const v = change && change.value;
+      if(v && Array.isArray(v.statuses) && v.statuses.length) return true;
+    }
+  }
+  return false;
+}
+
 const MENU =
   'Welcome to Maison Velour ✨ How can I help?\n\n' +
   '1. 📦 Track my order\n' +
@@ -238,6 +252,6 @@ async function aiReply(userText, orderContext){
 
 module.exports = {
   config, isConfigured, canReplyWithAi, verifySignature, extractMessages,
-  parseTracking, publicOrder, formatOrder, sendText, aiReply, describeShape,
+  parseTracking, publicOrder, formatOrder, sendText, aiReply, describeShape, hasStatuses,
   MENU, ASK_TRACKING, FAQ, ESCALATE, NEED_HUMAN
 };
